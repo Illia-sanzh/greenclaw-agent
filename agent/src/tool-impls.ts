@@ -411,14 +411,27 @@ export async function webSearch(query: string, maxResults = 5): Promise<string> 
   }
 }
 
+function rewriteForInternalAccess(url: string): string {
+  if (!WP_URL) return url;
+  try {
+    const wpOrigin = new URL(WP_URL).origin;
+    if (url.startsWith(wpOrigin)) {
+      return url.replace(wpOrigin, "http://host.docker.internal");
+    }
+  } catch {}
+  return url;
+}
+
 export async function screenshot(url: string, fullPage = false): Promise<string> {
   if (!url?.trim()) return "ERROR: No URL provided.";
+
+  const screenshotUrl = rewriteForInternalAccess(url);
 
   try {
     const resp = await axios.post(
       `${BROWSER_URL}/chrome/screenshot?token=${BROWSER_TOKEN}`,
       {
-        url,
+        url: screenshotUrl,
         options: { fullPage, type: "png" },
         gotoOptions: { waitUntil: "networkidle2", timeout: 30_000 },
       },
