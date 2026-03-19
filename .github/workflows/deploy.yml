@@ -7,6 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ secrets.DEPLOY_HOST != '' }}
     steps:
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.2.2
@@ -23,7 +24,7 @@ jobs:
             curl -sf http://localhost:3010/health || echo "Health check failed"
 
       - name: Notify Telegram
-        if: always()
+        if: always() && secrets.TELEGRAM_BOT_TOKEN != ''
         uses: appleboy/telegram-action@master
         with:
           to: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
