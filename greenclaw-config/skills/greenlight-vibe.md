@@ -74,21 +74,15 @@ node /app/config/skills/scripts/deconvert.js /tmp/blocks.txt -o /tmp/edit.html
 
 Edit `/tmp/edit.html` with the requested changes, then convert back using Step 2. For simple changes (color, text, single attribute), edit the block JSON directly instead.
 
-### Step 3: Validate code of blocks
-
-To validate code after conversion, read the instruction files and make sure that code is relevant to requirements for Greenshift block syntax:
-
-- `read_file` path: `/app/config/skills/greenlight-instructions/core-structure.md` — block structure rules
-- `read_file` path: `/app/config/skills/greenlight-instructions/attributes.md` — HTML attributes and parameters
-- If code has scripts: `/app/config/skills/greenlight-instructions/scripts.md`
-
-***Important*** If you use returned code to add it to page programatically, for example, via MCP or REST API, make sure to add attribute "CSSRender": "1" to blocks which have styleAttributes attribute or dynamicGClasses attribute
-
-### Step 4: Fit to inner variable system
+### Step 3: Fit to inner variable system
 
 Check if we have some values in styles that matches or close to one of our existed variables. If yes, replace value with variable and fallback
 
 Read `/app/config/skills/greenlight-instructions/variables.md` for complete list of variables.
+
+### Step 4: Validate frontend styles and scripts
+
+If you add code as content and save it in wordpress site, read and follow `/app/config/skills/greenlight-instructions/validate-styles.md` for CSS rendering and `/app/config/skills/greenlight-instructions/validate-scripts.md` if you have custom scripts in blocks.
 
 ## Dynamic Content
 
@@ -110,3 +104,31 @@ For chart blocks, read `/app/config/skills/greenlight-instructions/charts.md`.
 - No explanations or surrounding text
 - **No HTML comments** - WordPress strips them; use `metadata:{"name":"..."}` for adding relevant titles to blocks.
 - Ready to paste directly into WordPress Gutenberg code editor
+
+
+## Workflow to edit existing design of page that is made with greenshift-blocks
+
+If user asked for minimal changes, like color change, try to edit blocks code directly and save updated code.
+
+If user asked to make bigger changes, you need to make next steps.
+
+### Step 1: Prepare code
+
+Take raw content of page and check if it has greenshift-blocks/element blocks.
+
+### Step 2: Convert Block code back to HTML
+
+Save the blocks code to a temporary `.html` file, then run the deconverter script:
+
+```bash
+wp post get <ID> --field=post_content > /tmp/blocks.txt
+node /app/config/skills/scripts/deconvert.js /tmp/blocks.txt -o /tmp/edit.html
+```
+
+### Step 3: Edit the converted code and convert it back to blocks
+
+Make the requested changes in the HTML/CSS/JS produced by the deconverter. After editing, run the normal HTML-to-block conversion workflow again and validate the final Greenshift block code.
+
+### Step 4: Replace the full original block content
+
+Return the full updated Greenshift block code and use it as a complete replacement for the original block content. Do not return only a diff or partial fragment. Keep unchanged blocks and attributes as they were unless they must change to support the requested update.
