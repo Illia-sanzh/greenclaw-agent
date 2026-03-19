@@ -223,6 +223,8 @@ services:
       CONCURRENT: "3"
       LAUNCH_ARGS: '["--no-sandbox","--disable-dev-shm-usage"]'
       TOKEN: "browserless"
+    extra_hosts:
+      - "host.docker.internal:172.28.0.1"
     mem_limit: 1024m
     networks:
       agent-internal: {}   # Agent reaches it here
