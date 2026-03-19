@@ -63,6 +63,17 @@ node /app/config/skills/scripts/convert.js /tmp/input.html -o /tmp/output.txt  #
 cat /tmp/input.html | node /app/config/skills/scripts/convert.js          # pipe from stdin
 ```
 
+### Step 2b: Deconvert Blocks to HTML (for editing existing pages)
+
+If the user asks to modify an existing Greenshift page and the changes are complex (structural, layout, adding/removing sections), use the deconvert script to get editable HTML:
+
+```bash
+wp post get <ID> --field=post_content > /tmp/blocks.txt
+node /app/config/skills/scripts/deconvert.js /tmp/blocks.txt -o /tmp/edit.html
+```
+
+Edit `/tmp/edit.html` with the requested changes, then convert back using Step 2. For simple changes (color, text, single attribute), edit the block JSON directly instead.
+
 ### Step 3: Validate code of blocks
 
 To validate code after conversion, read the instruction files and make sure that code is relevant to requirements for Greenshift block syntax:
