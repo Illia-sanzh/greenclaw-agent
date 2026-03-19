@@ -19,6 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     socat \
     gnupg \
+    build-essential \
+    python3 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -32,7 +34,7 @@ WORKDIR /app
 
 # Install Node dependencies (production + dev for tsx)
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm install --include=dev
 
 COPY agent.ts tsconfig.json ./
 COPY src/ ./src/
