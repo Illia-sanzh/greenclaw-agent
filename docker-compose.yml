@@ -191,7 +191,7 @@ services:
   # Self-hosted metasearch (SearXNG). No API keys needed.
   # Agent calls its JSON API to search the web.
   greenclaw-searxng:
-    image: searxng/searxng:2024.12.23-67610fa2c
+    image: searxng/searxng:latest
     container_name: greenclaw-searxng
     restart: unless-stopped
     volumes:
