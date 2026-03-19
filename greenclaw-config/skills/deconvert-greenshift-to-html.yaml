@@ -1,0 +1,13 @@
+name: deconvert_greenshift_to_html
+description: >
+  Convert Greenshift block code back to vanilla HTML/CSS/JS.
+  Use this when you need to make complex edits to an existing Greenshift page.
+  First get the post content (wp post get <ID> --field=post_content > /tmp/blocks.txt),
+  then deconvert it, edit the HTML, and convert back with skill_convert.
+type: command
+command: "node /app/config/skills/scripts/deconvert.js {file_path}"
+parameters:
+  - name: file_path
+    type: string
+    description: "Path to the file containing Greenshift block code (e.g. /tmp/blocks.txt)"
+    required: true
