@@ -99,18 +99,17 @@ export function registerCommands(): void {
           "• `auto` — smart routing ⚡/◆/🧠\n\n" +
           "*Anthropic:*\n" +
           "• `claude-sonnet-4-6` — default, best quality\n" +
-          "• `claude-haiku-4-5` — fast & cheap\n" +
           "• `claude-opus-4-6` — hardest tasks\n\n" +
           "*OpenAI:*\n" +
-          "• `gpt-4o` / `gpt-4o-mini`\n\n" +
+          "• `gpt-5.4-mini`\n\n" +
           "*DeepSeek:*\n" +
           "• `deepseek-chat` / `deepseek-reasoner`\n\n" +
           "*Google:*\n" +
-          "• `gemini-2.0-flash`\n\n" +
+          "• `gemini-2.5-flash` / `gemini-2.5-pro`\n\n" +
           "*Via OpenRouter* \\(only OPENROUTER\\_API\\_KEY needed\\):\n" +
-          "• `openrouter/claude-sonnet-4-6` / `openrouter/claude-opus-4-6` / `openrouter/claude-haiku-4-5`\n" +
-          "• `openrouter/gpt-4o` / `openrouter/gpt-4o-mini`\n" +
-          "• `openrouter/gemini-2.0-flash`\n" +
+          "• `openrouter/claude-sonnet-4-6` / `openrouter/claude-opus-4-6`\n" +
+          "• `openrouter/gpt-5.4-mini`\n" +
+          "• `openrouter/gemini-2.5-flash`\n" +
           "• `openrouter/deepseek-chat` / `openrouter/deepseek-r1`\n" +
           "• `openrouter/llama-3.3-70b` · `openrouter/mistral-large` · `openrouter/qwq-32b`\n" +
           "• Any slug from openrouter\\.ai — prefix with `openrouter/`\n\n" +

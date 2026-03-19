@@ -57,7 +57,7 @@ coreRouter.get("/audit", (_req, res) => {
 });
 
 coreRouter.post("/task", async (req: Request, res: Response) => {
-  const { message = "", model = DEFAULT_MODEL, history = [], profile: profileName } = req.body ?? {};
+  const { message = "", model = DEFAULT_MODEL, history = [], profile: profileName, lastProfile } = req.body ?? {};
   const trimmedHistory = history.length > 20 ? history.slice(-20) : history;
 
   if (!String(message).trim()) {
@@ -75,7 +75,7 @@ coreRouter.post("/task", async (req: Request, res: Response) => {
     profile = TASK_PROFILES[profileName];
     log.info(`[agent] Using explicit profile: ${profileName}`);
   } else {
-    profile = await routeTask(msg);
+    profile = await routeTask(msg, trimmedHistory, lastProfile);
   }
 
   res.setHeader("Content-Type", "application/x-ndjson");
@@ -84,11 +84,12 @@ coreRouter.post("/task", async (req: Request, res: Response) => {
   let lastResult: { text?: string; elapsed?: number; model?: string } = {};
   try {
     for await (const event of runAgent(msg, model, trimmedHistory, profile)) {
-      res.write(JSON.stringify(event) + "\n");
       if (event.type === "result") {
+        event.profile = profile.name;
         lastResult = event;
         log.info({ elapsed: event.elapsed, profile: profile.name }, "task complete");
       }
+      res.write(JSON.stringify(event) + "\n");
     }
     logAudit({
       source: "task",
@@ -292,7 +293,7 @@ coreRouter.post("/inbound", async (req: Request, res: Response) => {
   const thread = getThread(channel, threadKey);
   const profileModel =
     profile.model === "cheap"
-      ? pickAvailableModel(ROUTER_MODEL, "openrouter/claude-haiku", "openrouter/gpt-4o-mini", DEFAULT_MODEL)
+      ? pickAvailableModel(ROUTER_MODEL, "openrouter/gpt-5.4-mini", DEFAULT_MODEL)
       : profile.model;
   const model = reqModel ?? profileModel ?? DEFAULT_MODEL;
   const history = thread.history.slice(0, -1).map((h) => ({ role: h.role, content: h.content }));

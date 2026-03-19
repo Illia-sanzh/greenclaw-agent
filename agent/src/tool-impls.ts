@@ -6,6 +6,7 @@ import axios from "axios";
 import {
   log,
   MAX_OUTPUT_CHARS,
+  DATA_DIR,
   WP_PATH,
   WP_URL,
   WP_ADMIN_USER,
@@ -216,6 +217,7 @@ export const WRITABLE_PATHS = [
   `${WP_PATH}/wp-content/plugins/`,
   `${WP_PATH}/wp-content/themes/`,
   `${WP_PATH}/wp-content/mu-plugins/`,
+  `${DATA_DIR}/`,
 ];
 
 export function writeFile(filePath: string, content: string, append: boolean): string {
@@ -267,7 +269,7 @@ export async function replyToForum(postId: number, content: string): Promise<str
 export function readFile(filePath: string): string {
   if (!filePath) return "ERROR: No file path provided.";
   const normalized = path.resolve(filePath);
-  const readablePaths = ["/tmp/", path.resolve(WP_PATH) + "/"];
+  const readablePaths = ["/tmp/", path.resolve(WP_PATH) + "/", "/app/config/", path.resolve(DATA_DIR) + "/"];
   if (!readablePaths.some((p) => normalized.startsWith(p))) {
     return `ERROR: Can only read files under: ${readablePaths.join(", ")}`;
   }
@@ -280,6 +282,28 @@ export function readFile(filePath: string): string {
     return fs.readFileSync(normalized, "utf8");
   } catch (e: any) {
     return `ERROR: ${e.message}`;
+  }
+}
+
+const AGENT_MD_PATH = path.join(DATA_DIR, "AGENT.md");
+
+export function readAgentMemory(): string {
+  try {
+    if (fs.existsSync(AGENT_MD_PATH)) return fs.readFileSync(AGENT_MD_PATH, "utf8").trim();
+  } catch (e) {
+    log.warn(`[agent-memory] Failed to read AGENT.md: ${e}`);
+  }
+  return "";
+}
+
+export function updateAgentMemory(content: string): string {
+  if (!content.trim()) return "ERROR: Cannot write empty content to AGENT.md.";
+  try {
+    fs.writeFileSync(AGENT_MD_PATH, content.trim() + "\n", "utf8");
+    log.info(`[agent-memory] Updated AGENT.md (${content.length} chars)`);
+    return `OK: AGENT.md updated (${content.length} chars). I will remember this in future conversations.`;
+  } catch (e: any) {
+    return `ERROR: Failed to write AGENT.md: ${e.message}`;
   }
 }
 
@@ -394,36 +418,22 @@ export async function screenshot(url: string, fullPage = false): Promise<string>
       `${BROWSER_URL}/screenshot`,
       {
         url,
-        options: { fullPage, type: "png", quality: 80 },
+        options: { fullPage, type: "png" },
         gotoOptions: { waitUntil: "networkidle2", timeout: 30_000 },
       },
       {
         timeout: 45_000,
         responseType: "arraybuffer",
         proxy: false,
+        headers: { "Content-Type": "application/json" },
       },
     );
 
     const buffer = Buffer.from(resp.data);
-    const filename = `screenshot-${Date.now()}.png`;
-    const tmpPath = `/tmp/${filename}`;
+    const tmpPath = `/tmp/screenshot-${Date.now()}.png`;
     fs.writeFileSync(tmpPath, buffer);
 
-    const upload = await uploadMediaToWp(buffer, filename, "image/png");
-
-    let publicUrl = "";
-    if (!upload.error && upload.url) {
-      publicUrl = upload.url;
-      if (WP_URL && publicUrl.includes("host.docker.internal")) {
-        publicUrl = publicUrl.replace(/https?:\/\/host\.docker\.internal/, WP_URL.replace(/\/$/, ""));
-      }
-    }
-
-    // [IMAGE:path] marker tells the agent loop to inject this as a vision message
-    let result = `Screenshot captured (${buffer.length} bytes).\n[IMAGE:${tmpPath}]`;
-    if (publicUrl) result += `\nPublic URL: ${publicUrl}`;
-    if (upload.id) result += `\nMedia ID: ${upload.id}`;
-    return result;
+    return `Screenshot captured (${buffer.length} bytes).\n[IMAGE:${tmpPath}]`;
   } catch (e: any) {
     if (e.code === "ECONNREFUSED") return "ERROR: Browser service unavailable. Browserless may not be running.";
     return `ERROR: Screenshot failed — ${e.message}`;

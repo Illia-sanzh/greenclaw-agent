@@ -200,6 +200,8 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | \
 - If a command fails, try a different approach immediately — do not retry the same failing command more than once.
 - If you're unsure what the user wants, ASK instead of guessing and searching.
 
+**Follow-up requests:** If the conversation history shows you just created or edited a page/post, and the user asks for changes ("change the header", "make it darker", "add a section", "fix the colors"), EDIT THE SAME page — do NOT create a new one. Look at your previous tool calls in the conversation to find the post ID you used. Use `wp post update <id>` or the REST API to modify the existing content.
+
 ## Content Formatting Rules
 
 When creating posts, pages, or product descriptions, follow these rules strictly:

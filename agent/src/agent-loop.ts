@@ -12,6 +12,12 @@ import type { TaskProfile, AgentEvent, ChatMessage } from "./types";
 
 const SUMMARIZE_AFTER = 6;
 const IMAGE_MARKER_RE = /\[IMAGE:([^\]]+)\]/g;
+const VISION_MODELS = ["claude", "gpt-5", "gpt-4-turbo", "gemini"];
+
+function supportsVision(model: string): boolean {
+  const m = model.toLowerCase();
+  return VISION_MODELS.some((v) => m.includes(v));
+}
 
 function extractImages(toolResult: string): { text: string; images: string[] } {
   const images: string[] = [];
@@ -40,12 +46,7 @@ export async function summarizeHistory(
   const toKeep = history.slice(-4);
 
   try {
-    const cheapModel = pickAvailableModel(
-      ROUTER_MODEL,
-      `openrouter/claude-haiku`,
-      "openrouter/gpt-4o-mini",
-      DEFAULT_MODEL,
-    );
+    const cheapModel = pickAvailableModel(ROUTER_MODEL, "openrouter/gpt-5.4-mini", DEFAULT_MODEL);
     const summaryResp = await client.chat.completions.create({
       model: cheapModel,
       messages: [
@@ -96,14 +97,10 @@ export async function runSingleShot(
     { role: "user", content: userMessage },
   ];
 
-  const fallback = model.startsWith("openrouter/")
-    ? pickAvailableModel(
-        OR_FALLBACK_MODEL,
-        "openrouter/gemini-2.0-flash",
-        "openrouter/deepseek-chat",
-        "openrouter/claude-haiku",
-      )
-    : pickAvailableModel(FALLBACK_MODEL, "gemini-2.0-flash", "deepseek-chat", "claude-haiku");
+  const fallbackChain = model.startsWith("openrouter/")
+    ? [OR_FALLBACK_MODEL, FALLBACK_MODEL, "openrouter/deepseek-chat", "deepseek-chat"]
+    : [FALLBACK_MODEL, OR_FALLBACK_MODEL, "deepseek-chat", "openrouter/deepseek-chat"];
+  const fallback = pickAvailableModel(...fallbackChain);
 
   try {
     const resp = await client.chat.completions.create({
@@ -154,21 +151,8 @@ export async function* runAgent(
   if (profile.model) {
     model =
       profile.model === "cheap"
-        ? pickAvailableModel(ROUTER_MODEL, "openrouter/claude-haiku", "openrouter/gpt-4o-mini", DEFAULT_MODEL)
+        ? pickAvailableModel(ROUTER_MODEL, "openrouter/gpt-5.4-mini", DEFAULT_MODEL)
         : profile.model;
-  } else if (profile.maxSteps > 5) {
-    const cheapModels = [
-      "claude-haiku",
-      "claude-haiku-4-5",
-      "openrouter/claude-haiku",
-      "openrouter/claude-haiku-4-5",
-      "gpt-4o-mini",
-      "openrouter/gpt-4o-mini",
-    ];
-    if (cheapModels.includes(model)) {
-      log.info(`[agent] Upgrading model from ${model} → ${DEFAULT_MODEL} for agentic profile '${profile.name}'`);
-      model = DEFAULT_MODEL;
-    }
   }
 
   let systemInjected = false;
@@ -178,18 +162,15 @@ export async function* runAgent(
   let recentErrors: string[] = [];
   let lastToolSig = "";
   let repeatCount = 0;
+  const collectedImages: string[] = [];
   const profileTools = getToolsForProfile(profile);
   const maxSteps = profile.maxSteps || MAX_STEPS;
   const maxTokens = profile.maxTokens || 16384;
   const maxOutput = profile.maxOutputChars || MAX_OUTPUT_CHARS;
-  const fallback = model.startsWith("openrouter/")
-    ? pickAvailableModel(
-        OR_FALLBACK_MODEL,
-        "openrouter/gemini-2.0-flash",
-        "openrouter/deepseek-chat",
-        "openrouter/claude-haiku",
-      )
-    : pickAvailableModel(FALLBACK_MODEL, "gemini-2.0-flash", "deepseek-chat", "claude-haiku");
+  const fallbackChain = model.startsWith("openrouter/")
+    ? [OR_FALLBACK_MODEL, FALLBACK_MODEL, "openrouter/deepseek-chat", "deepseek-chat"]
+    : [FALLBACK_MODEL, OR_FALLBACK_MODEL, "deepseek-chat", "openrouter/deepseek-chat"];
+  const fallback = pickAvailableModel(...fallbackChain);
 
   log.info(
     `[agent] Profile: ${profile.name} | tools: ${profileTools.length} | maxSteps: ${maxSteps} | maxTokens: ${maxTokens}`,
@@ -279,7 +260,13 @@ export async function* runAgent(
     messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls } as any);
 
     if (!msg.tool_calls?.length) {
-      yield { type: "result", text: msg.content ?? "(no response)", elapsed: (Date.now() - start) / 1000, model };
+      yield {
+        type: "result",
+        text: msg.content ?? "(no response)",
+        elapsed: (Date.now() - start) / 1000,
+        model,
+        ...(collectedImages.length ? { images: collectedImages } : {}),
+      };
       return;
     }
 
@@ -312,17 +299,17 @@ export async function* runAgent(
       log.info(`[agent]   → ${String(toolResult).slice(0, 200)}`);
 
       const { text: cleanResult, images } = extractImages(toolResult);
-      if (images.length > 0) {
-        const contentParts: any[] = [{ type: "text", text: cleanResult || "Screenshot captured." }];
+      collectedImages.push(...images);
+      messages.push({ role: "tool", tool_call_id: tc.id, content: cleanResult || toolResult } as any);
+      if (images.length > 0 && supportsVision(model)) {
+        const contentParts: any[] = [{ type: "text", text: "Here is the screenshot I just captured:" }];
         for (const b64 of images) {
           contentParts.push({
             type: "image_url",
             image_url: { url: `data:image/png;base64,${b64}` },
           });
         }
-        messages.push({ role: "tool", tool_call_id: tc.id, content: contentParts } as any);
-      } else {
-        messages.push({ role: "tool", tool_call_id: tc.id, content: toolResult } as any);
+        messages.push({ role: "user", content: contentParts } as any);
       }
 
       if (String(toolResult).startsWith("ERROR")) {
@@ -351,6 +338,7 @@ export async function* runAgent(
         text: `I've encountered errors on ${consecutiveErrors} consecutive attempts and stopped to avoid wasting time.${errorDetail}\n\nPlease check the approach and try again with more specific instructions.`,
         elapsed: (Date.now() - start) / 1000,
         model,
+        ...(collectedImages.length ? { images: collectedImages } : {}),
       };
       return;
     }
@@ -363,6 +351,7 @@ export async function* runAgent(
         text: `I got stuck in a loop — repeated the same "${repeatedAction}" call ${repeatCount + 1} times. Could you rephrase what you'd like me to do?`,
         elapsed: (Date.now() - start) / 1000,
         model,
+        ...(collectedImages.length ? { images: collectedImages } : {}),
       };
       return;
     }
@@ -381,5 +370,6 @@ export async function* runAgent(
     text: "Reached the maximum number of steps. The task may be partially complete.",
     elapsed: (Date.now() - start) / 1000,
     model,
+    ...(collectedImages.length ? { images: collectedImages } : {}),
   };
 }

@@ -1,3 +1,4 @@
+import { InputFile } from "grammy";
 import { MyContext } from "./types";
 import { AGENT_URL, DEFAULT_MODEL, AUTO_ROUTING, log } from "./config";
 import { agentAxios } from "./http";
@@ -9,6 +10,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
   stopFlags.delete(chatId);
   const manualModel = ctx.session.model;
   const history = ctx.session.history ?? [];
+  const lastProfile = ctx.session.lastProfile;
 
   let model: string;
   let modelHint: string;
@@ -31,6 +33,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
   let result = "(no result)";
   let elapsed = 0;
   let modelUsed = model;
+  let imageUrls: string[] = [];
   const steps: string[] = [];
 
   function buildStatus(): string {
@@ -45,7 +48,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
   try {
     const response = await agentAxios.post(
       `${AGENT_URL}/task`,
-      { message: taskText, model, history },
+      { message: taskText, model, history, lastProfile },
       { responseType: "stream", timeout: 310_000 },
     );
 
@@ -75,6 +78,8 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
               result = event.text ?? "(no result)";
               elapsed = event.elapsed ?? 0;
               modelUsed = event.model ?? model;
+              if (event.profile) ctx.session.lastProfile = event.profile;
+              if (event.images?.length) imageUrls = event.images;
             }
           } catch {}
         }
@@ -112,12 +117,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
     await ctx.api.deleteMessage(statusMsg.chat.id, statusMsg.message_id);
   } catch {}
 
-  // Strip internal image markers
   result = result.replace(/\[IMAGE:[^\]]+\]/g, "").trim();
-
-  // Extract image URLs from result and send as photos
-  const imageUrlRegex = /(https?:\/\/\S+\.(?:png|jpg|jpeg|gif|webp))/gi;
-  const imageUrls = [...new Set(result.match(imageUrlRegex) ?? [])];
 
   const MAX_LEN = 4000;
   const footer = `\n\n_⏱ ${elapsed}s • ${modelUsed}_`;
@@ -137,11 +137,28 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
     }
   }
 
-  for (const imgUrl of imageUrls) {
+  if (imageUrls.length === 1) {
     try {
-      await ctx.replyWithPhoto(imgUrl);
+      await ctx.replyWithPhoto(new InputFile(Buffer.from(imageUrls[0], "base64"), "screenshot.png"));
     } catch (e) {
-      log.warn(`Failed to send photo ${imgUrl}: ${e}`);
+      log.warn(`Failed to send photo to Telegram: ${e}`);
+    }
+  } else if (imageUrls.length > 1) {
+    const media = imageUrls.map((b64, i) => ({
+      type: "photo" as const,
+      media: new InputFile(Buffer.from(b64, "base64"), `screenshot-${i + 1}.png`),
+    }));
+    try {
+      await ctx.replyWithMediaGroup(media);
+    } catch (e) {
+      log.warn(`Failed to send media group: ${e}, falling back to individual photos`);
+      for (let i = 0; i < imageUrls.length; i++) {
+        try {
+          await ctx.replyWithPhoto(new InputFile(Buffer.from(imageUrls[i], "base64"), `screenshot-${i + 1}.png`));
+        } catch (e2) {
+          log.warn(`Failed to send photo ${i + 1}: ${e2}`);
+        }
+      }
     }
   }
 }

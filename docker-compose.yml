@@ -191,21 +191,22 @@ services:
   # Self-hosted metasearch (SearXNG). No API keys needed.
   # Agent calls its JSON API to search the web.
   greenclaw-searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2024.12.23-67610fa2c
     container_name: greenclaw-searxng
     restart: unless-stopped
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      SEARXNG_BASE_URL: "http://localhost:8888/"
+      SEARXNG_BASE_URL: "http://localhost:8080/"
     mem_limit: 256m
     networks:
-      agent-internal: {}
+      agent-internal: {}   # Agent reaches it here
+      proxy-external: {}   # Needs internet for DNS + search engine queries
     depends_on:
       greenclaw-squid:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8888/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/healthz || exit 1"]
       interval: 20s
       timeout: 10s
       retries: 5
@@ -214,16 +215,17 @@ services:
   # ── Headless Browser ─────────────────────────────────────────────────────
   # Chromium for screenshots and page rendering. Agent calls its HTTP API.
   greenclaw-browser:
-    image: browserless/chrome:latest
+    image: browserless/chrome:2-chrome-stable
     container_name: greenclaw-browser
     restart: unless-stopped
     environment:
       CONNECTION_TIMEOUT: "60000"
       MAX_CONCURRENT_SESSIONS: "3"
-      DEFAULT_LAUNCH_ARGS: '["--proxy-server=http://greenclaw-squid:3128","--no-sandbox","--disable-dev-shm-usage"]'
+      DEFAULT_LAUNCH_ARGS: '["--no-sandbox","--disable-dev-shm-usage"]'
     mem_limit: 1024m
     networks:
-      agent-internal: {}
+      agent-internal: {}   # Agent reaches it here
+      proxy-external: {}   # Chrome needs internet to load pages
     depends_on:
       greenclaw-squid:
         condition: service_healthy

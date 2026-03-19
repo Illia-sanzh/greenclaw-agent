@@ -8,6 +8,7 @@ export interface ChatMessage {
 export interface SessionData {
   model?: string;
   history?: ChatMessage[];
+  lastProfile?: string;
   skillStep?: string;
   skillDraft?: Record<string, any>;
   pendingSkillDelete?: string;
