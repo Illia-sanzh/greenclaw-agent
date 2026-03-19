@@ -35,15 +35,34 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
   let modelUsed = model;
   let imageUrls: string[] = [];
   const steps: string[] = [];
+  const taskStart = Date.now();
+  let lastStatusText = "";
+
+  function formatTimer(): string {
+    const secs = Math.floor((Date.now() - taskStart) / 1000);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `0:${String(s).padStart(2, "0")}`;
+  }
 
   function buildStatus(): string {
-    const lines = ["🤔 Thinking…"];
+    const lines = [`🤔 Thinking… ⏱ ${formatTimer()}`];
     if (steps.length) {
       lines.push("");
       steps.forEach((s, i) => lines.push(`${i + 1}. ${s}`));
     }
     return lines.join("\n");
   }
+
+  function updateStatus(): void {
+    const text = buildStatus();
+    if (text === lastStatusText) return;
+    lastStatusText = text;
+    ctx.api.editMessageText(statusMsg.chat.id, statusMsg.message_id, text).catch(() => {});
+  }
+
+  // Tick timer every 5s so user sees the task is alive
+  const timerInterval = setInterval(updateStatus, 5000);
 
   try {
     const response = await agentAxios.post(
@@ -71,9 +90,9 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
             const etype = event.type;
             if (etype === "progress") {
               steps.push(event.text ?? "⚙️ Working…");
-              ctx.api.editMessageText(statusMsg.chat.id, statusMsg.message_id, buildStatus()).catch(() => {});
+              updateStatus();
             } else if (etype === "thinking") {
-              ctx.api.editMessageText(statusMsg.chat.id, statusMsg.message_id, buildStatus()).catch(() => {});
+              updateStatus();
             } else if (etype === "result") {
               result = event.text ?? "(no result)";
               elapsed = event.elapsed ?? 0;
@@ -89,6 +108,8 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
       response.data.on("close", resolve);
     });
 
+    clearInterval(timerInterval);
+
     if (stopped || stopFlags.get(chatId)) {
       stopFlags.delete(chatId);
       try {
@@ -97,6 +118,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
       return;
     }
   } catch (e: any) {
+    clearInterval(timerInterval);
     if (e.code === "ECONNABORTED" || e.message?.includes("timeout")) {
       result = "⏱️ Timed out after 5 minutes.";
     } else if (e.code === "ECONNREFUSED") {
