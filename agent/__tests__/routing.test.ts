@@ -78,6 +78,7 @@ describe("getToolsForProfile", () => {
     { function: { name: "mcp_server_github__create_issue" } },
     { function: { name: "mcp_server_github__create_pr" } },
     { function: { name: "wp_ability__manage_plugins" } },
+    { function: { name: "update_agent_memory" } },
   ];
 
   it("returns all tools for general profile (wildcard)", () => {
@@ -137,7 +138,9 @@ describe("getToolsForProfile", () => {
     expect(names).toContain("schedule_task");
     expect(names).toContain("run_command");
     expect(names).toContain("wp_rest");
-    expect(names).toHaveLength(3);
+    expect(names).toContain("read_file");
+    expect(names).toContain("update_agent_memory");
+    expect(names).toHaveLength(5);
   });
 });
 
