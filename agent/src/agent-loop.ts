@@ -155,7 +155,11 @@ export async function* runAgent(
         : profile.model;
   }
 
-  let systemInjected = false;
+  // OpenAI/GPT models don't support top-level `system` param — inject into messages upfront
+  let systemInjected = /gpt|openai|o1|o3|o4/i.test(model);
+  if (systemInjected) {
+    messages.unshift({ role: "system", content: systemPrompt });
+  }
   const start = Date.now();
   let steps = 0;
   let consecutiveErrors = 0;
@@ -181,48 +185,52 @@ export async function* runAgent(
     yield { type: "thinking" };
 
     let response: OpenAI.Chat.ChatCompletion;
-    try {
-      response = await client.chat.completions.create({
+    const makeRequest = () =>
+      client.chat.completions.create({
         model,
         messages,
         tools: profileTools.length > 0 ? profileTools : undefined,
         tool_choice: profileTools.length > 0 ? "auto" : undefined,
         // @ts-ignore — LiteLLM extension: system passed as extra field
-        system: systemPrompt,
+        ...(systemInjected ? {} : { system: systemPrompt }),
         max_tokens: maxTokens,
         ...effortBody(model, profile.effort),
       } as any);
+
+    try {
+      response = await makeRequest();
     } catch (firstErr: any) {
-      if (firstErr?.message?.includes("system") && !systemInjected) {
+      const errMsg = String(firstErr.message ?? firstErr);
+
+      // Fix system param: inject into messages and retry
+      if (errMsg.includes("system") && !systemInjected) {
         messages.unshift({ role: "system", content: systemPrompt });
         systemInjected = true;
         try {
-          response = await client.chat.completions.create({
-            model,
-            messages,
-            tools: profileTools.length > 0 ? profileTools : undefined,
-            tool_choice: profileTools.length > 0 ? "auto" : undefined,
-            max_tokens: maxTokens,
-            ...effortBody(model, profile.effort),
-          } as any);
+          response = await makeRequest();
         } catch (e2: any) {
           const err2 = String(e2.message ?? e2);
-          if (model !== fallback && state.availableModels.has(fallback)) {
-            log.warn(`[agent] Model ${model} failed (${err2}), trying ${fallback}`);
-            yield* runAgent(userMessage, fallback, history, profile);
-            return;
-          }
           yield { type: "result", text: `AI service error: ${err2}`, elapsed: (Date.now() - start) / 1000, model };
           return;
         }
       } else {
-        const err = String(firstErr.message ?? firstErr);
-        if (model !== fallback && state.availableModels.has(fallback)) {
-          log.warn(`[agent] Model ${model} failed (${err}), trying ${fallback}`);
-          yield* runAgent(userMessage, fallback, history, profile);
-          return;
+        // Retry transient errors (rate limit, server errors) up to 2 times with backoff
+        const status = firstErr?.status ?? firstErr?.statusCode ?? 0;
+        const isTransient =
+          [429, 500, 502, 503, 504].includes(status) || /rate.?limit|timeout|overloaded/i.test(errMsg);
+
+        if (isTransient && consecutiveErrors < 2) {
+          const delay = (consecutiveErrors + 1) * 5000;
+          log.warn(`[agent] Transient error (${status}): ${errMsg.slice(0, 100)}, retrying in ${delay / 1000}s…`);
+          yield { type: "progress", text: `⏳ API error, retrying in ${delay / 1000}s…` };
+          await new Promise((r) => setTimeout(r, delay));
+          consecutiveErrors++;
+          steps--; // don't count this as a step
+          continue;
         }
-        yield { type: "result", text: `AI service error: ${err}`, elapsed: (Date.now() - start) / 1000, model };
+
+        log.error(`[agent] Model ${model} failed: ${errMsg.slice(0, 200)}`);
+        yield { type: "result", text: `AI service error: ${errMsg}`, elapsed: (Date.now() - start) / 1000, model };
         return;
       }
     }
