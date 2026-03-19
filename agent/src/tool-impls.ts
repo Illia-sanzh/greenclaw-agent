@@ -15,6 +15,7 @@ import {
   BRIDGE_SECRET,
   SEARXNG_URL,
   BROWSER_URL,
+  BROWSER_TOKEN,
 } from "./config";
 import { state } from "./state";
 import { httpRequest } from "./http";
@@ -415,7 +416,7 @@ export async function screenshot(url: string, fullPage = false): Promise<string>
 
   try {
     const resp = await axios.post(
-      `${BROWSER_URL}/screenshot`,
+      `${BROWSER_URL}/chrome/screenshot?token=${BROWSER_TOKEN}`,
       {
         url,
         options: { fullPage, type: "png" },
