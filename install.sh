@@ -363,7 +363,18 @@ if [[ -z "$FOUND_WP_PATH" ]]; then
         echo "  Tip: use an Application Password (WP Admin → Users → Profile)"
         read -rsp "  Admin password or Application Password: " WP_ADMIN_PASSWORD; echo
         [[ -z "$WP_ADMIN_PASSWORD" ]] && die "Password is required."
+        echo
+        warn "Remote mode: the agent uses the REST API and bridge plugin to manage WordPress."
+        echo "    WP-CLI runs remotely through the bridge plugin (not locally)."
+        echo "    You must install the bridge plugin on the remote server (shown at the end)."
     fi
+fi
+
+# For remote WP, create an empty placeholder so the Docker volume mount doesn't fail.
+# docker-compose uses ${WP_PATH:-/var/www/html}, so we set a real but empty path.
+if [[ "$WP_REMOTE" == "true" ]]; then
+    WP_PATH="/tmp/wp-remote-placeholder"
+    mkdir -p "$WP_PATH"
 fi
 
 # Adjust step count now that we know whether WP needs installing
@@ -372,6 +383,7 @@ fi
 LITELLM_MASTER_KEY="sk-$(openssl rand -hex 24)"
 BRIDGE_SECRET="$(openssl rand -hex 32)"
 MCP_ENV_SECRET="$(openssl rand -hex 32)"
+INBOUND_SECRET="$(openssl rand -hex 32)"
 
 echo
 ok "Configuration collected."
@@ -629,7 +641,7 @@ BRIDGE_SECRET=${BRIDGE_SECRET}
 MCP_ENV_SECRET=${MCP_ENV_SECRET}
 
 GITHUB_DEFAULT_REPO=${GITHUB_DEFAULT_REPO}
-INBOUND_SECRET=${BRIDGE_SECRET}
+INBOUND_SECRET=${INBOUND_SECRET}
 EOF
     chmod 600 .env
 }
@@ -780,7 +792,9 @@ if [[ "$WP_REMOTE" == "true" ]]; then
     echo "    1. Copy wordpress-bridge-plugin/greenclaw-wp-bridge.php to the remote server"
     echo "       into: wp-content/plugins/greenclaw-wp-bridge/"
     echo "    2. Activate in WP Admin → Plugins"
-    echo "    3. Settings → GreenClaw Bridge → paste secret below"
+    echo "    3. Settings → GreenClaw Bridge → paste this secret:"
+    echo "       ${BRIDGE_SECRET}"
+    echo "    Without the bridge plugin, WP-CLI commands won't work (REST API still works)."
 
 elif [[ -n "$WP_PATH" ]] && [[ -f "$PLUGIN_FILE" ]]; then
 
