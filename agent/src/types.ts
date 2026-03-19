@@ -55,6 +55,7 @@ export interface AgentEvent {
   elapsed?: number;
   model?: string;
   images?: string[];
+  profile?: string;
 }
 
 export interface ChatMessage {

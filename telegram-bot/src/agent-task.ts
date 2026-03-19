@@ -10,6 +10,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
   stopFlags.delete(chatId);
   const manualModel = ctx.session.model;
   const history = ctx.session.history ?? [];
+  const lastProfile = ctx.session.lastProfile;
 
   let model: string;
   let modelHint: string;
@@ -47,7 +48,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
   try {
     const response = await agentAxios.post(
       `${AGENT_URL}/task`,
-      { message: taskText, model, history },
+      { message: taskText, model, history, lastProfile },
       { responseType: "stream", timeout: 310_000 },
     );
 
@@ -77,6 +78,7 @@ export async function runAgentTask(ctx: MyContext, taskText: string): Promise<vo
               result = event.text ?? "(no result)";
               elapsed = event.elapsed ?? 0;
               modelUsed = event.model ?? model;
+              if (event.profile) ctx.session.lastProfile = event.profile;
               if (event.images?.length) imageUrls = event.images;
             }
           } catch {}

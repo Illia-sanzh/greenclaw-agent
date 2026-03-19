@@ -54,7 +54,11 @@ export function pickAvailableModel(...prefs: string[]): string {
   return prefs[0] ?? DEFAULT_MODEL;
 }
 
-export async function routeTask(message: string): Promise<TaskProfile> {
+export async function routeTask(
+  message: string,
+  history: Array<{ role: string; content: string }> = [],
+  lastProfile?: string,
+): Promise<TaskProfile> {
   const routerPrompt = `You are a task router. Given a user message, classify it into exactly one category.
 Categories:
 - forum_reply: replying to a forum post or comment, answering a question from a forum user
@@ -67,17 +71,29 @@ Categories:
 - plugin_dev: creating NEW WordPress plugins from scratch, or MAJOR rewrites (adding multiple features, restructuring, building multi-file plugins). NOT for small edits or quick fixes — use wp_admin for those.
 - general: anything that doesn't fit above, or complex multi-domain tasks
 
+IMPORTANT — follow-up detection:
+If the conversation history shows the user was just working on a design/content task (web_design, greenshift, plugin_dev) and the new message is a follow-up like "change X", "make it Y", "update the Z", "fix the colors", "add a section", keep the SAME category as the previous task. Short modification requests after a creative task are continuations, not new tasks.
+${lastProfile ? `The previous task used the "${lastProfile}" profile.` : ""}
+
 Respond with ONLY the category name, nothing else.`;
 
   const routerModel = pickAvailableModel(ROUTER_MODEL, "openrouter/gpt-5.4-mini", DEFAULT_MODEL);
 
+  // Include last 2 history entries for follow-up detection
+  const contextMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: routerPrompt },
+  ];
+  const recentHistory = history.slice(-2);
+  for (const h of recentHistory) {
+    const role = h.role === "assistant" ? "assistant" : "user";
+    contextMessages.push({ role, content: h.content.slice(0, 300) });
+  }
+  contextMessages.push({ role: "user", content: message.slice(0, 500) });
+
   try {
     const resp = await client.chat.completions.create({
       model: routerModel,
-      messages: [
-        { role: "system", content: routerPrompt },
-        { role: "user", content: message.slice(0, 500) },
-      ],
+      messages: contextMessages,
       max_tokens: 20,
       temperature: 0,
       ...effortBody(routerModel, "low"),
