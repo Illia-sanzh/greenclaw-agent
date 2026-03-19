@@ -41,6 +41,7 @@ export const INBOUND_SECRET = process.env.INBOUND_SECRET ?? "";
 
 export const SEARXNG_URL = process.env.SEARXNG_URL ?? "http://greenclaw-searxng:8080";
 export const BROWSER_URL = process.env.BROWSER_URL ?? "http://greenclaw-browser:3000";
+export const BROWSER_TOKEN = process.env.BROWSER_TOKEN ?? "browserless";
 
 export const MAX_STEPS = 25;
 export const MAX_OUTPUT_CHARS = 8000;
