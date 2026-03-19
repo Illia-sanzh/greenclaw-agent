@@ -3,16 +3,19 @@
   "version": "1.0.0",
   "description": "Telegram Bot for WordPress Agent — TypeScript",
   "scripts": {
-    "start": "tsx bot.ts"
+    "start": "tsx bot.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@grammyjs/runner": "^2.0.3",
     "axios": "^1.7.0",
     "dotenv": "^16.4.0",
     "form-data": "^4.0.0",
     "grammy": "^1.28.0",
-    "@grammyjs/runner": "^2.0.3",
     "https-proxy-agent": "^7.0.5",
     "js-yaml": "^4.1.0",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.0.0",
     "tsx": "^4.16.0",
     "undici": "^6.19.0"
   },

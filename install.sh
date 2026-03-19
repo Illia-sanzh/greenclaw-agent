@@ -134,21 +134,21 @@ collect_key() {
 case "$provider_choice" in
     1) collect_key "Anthropic" ANTHROPIC_API_KEY "claude-sonnet-4-6"
        FALLBACK_MODEL="claude-sonnet-4-6" ;;
-    2) collect_key "OpenAI" OPENAI_API_KEY "gpt-4o"
-       FALLBACK_MODEL="gpt-4o" ;;
+    2) collect_key "OpenAI" OPENAI_API_KEY "gpt-5.4-mini"
+       FALLBACK_MODEL="gpt-5.4-mini" ;;
     3) collect_key "DeepSeek" DEEPSEEK_API_KEY "deepseek-chat"
        FALLBACK_MODEL="deepseek-chat" ;;
-    4) collect_key "Gemini" GEMINI_API_KEY "gemini-2.0-flash"
-       FALLBACK_MODEL="gemini-2.0-flash" ;;
+    4) collect_key "Gemini" GEMINI_API_KEY "gemini-2.5-flash"
+       FALLBACK_MODEL="gemini-2.5-flash" ;;
     5) echo "  Enter the keys you have (leave blank to skip):"
        read -rsp "  Anthropic API key: " ANTHROPIC_API_KEY; echo
        read -rsp "  OpenAI API key: "    OPENAI_API_KEY;    echo
        read -rsp "  DeepSeek API key: "  DEEPSEEK_API_KEY;  echo
        read -rsp "  Gemini API key: "    GEMINI_API_KEY;    echo
        if   [[ -n "$ANTHROPIC_API_KEY" ]]; then DEFAULT_MODEL="claude-sonnet-4-6"
-       elif [[ -n "$OPENAI_API_KEY" ]];   then DEFAULT_MODEL="gpt-4o"
+       elif [[ -n "$OPENAI_API_KEY" ]];   then DEFAULT_MODEL="gpt-5.4-mini"
        elif [[ -n "$DEEPSEEK_API_KEY" ]]; then DEFAULT_MODEL="deepseek-chat"
-       elif [[ -n "$GEMINI_API_KEY" ]];   then DEFAULT_MODEL="gemini-2.0-flash"
+       elif [[ -n "$GEMINI_API_KEY" ]];   then DEFAULT_MODEL="gemini-2.5-flash"
        else die "No API key entered."; fi ;;
     *) die "Invalid choice." ;;
 esac
@@ -205,11 +205,11 @@ if [[ "$_routing" =~ ^[Yy]$ ]]; then
     AUTO_ROUTING="true"
     # Pick sensible defaults based on the selected provider
     case "$DEFAULT_MODEL" in
-        claude-*)  _def_fast="claude-haiku-4-5"  ; _def_smart="claude-opus-4-6"   ;;
-        gpt-*)     _def_fast="gpt-4o-mini"        ; _def_smart="gpt-4o"            ;;
-        deepseek*) _def_fast="deepseek-chat"      ; _def_smart="deepseek-reasoner" ;;
-        gemini*)   _def_fast="gemini-2.0-flash"   ; _def_smart="gemini-2.0-flash"  ;;
-        *)         _def_fast="claude-haiku-4-5"   ; _def_smart="claude-opus-4-6"   ;;
+        claude-*)  _def_fast="claude-sonnet-4-6"  ; _def_smart="claude-opus-4-6"   ;;
+        gpt-*)     _def_fast="gpt-5.4-mini"       ; _def_smart="gpt-5.4-mini"      ;;
+        deepseek*) _def_fast="deepseek-chat"       ; _def_smart="deepseek-reasoner" ;;
+        gemini*)   _def_fast="gemini-2.5-flash"    ; _def_smart="gemini-2.5-pro"    ;;
+        *)         _def_fast="gpt-5.4-mini"        ; _def_smart="claude-opus-4-6"   ;;
     esac
     echo
     echo "  Recommended defaults for your provider:"
@@ -229,6 +229,20 @@ fi
 echo
 read -rp "  Monthly AI spend limit in USD [default=20]: \$" MONTHLY_BUDGET
 MONTHLY_BUDGET="${MONTHLY_BUDGET:-20}"
+
+# ── GitHub integration (optional) ────────────────────────────────────────
+echo
+echo -e "  ${BOLD}GitHub Integration${RESET}  ${CYAN}(optional)${RESET}"
+echo "  Enables automated bug fixing: forum bug → GitHub PR."
+echo "  Format: owner/repo  (e.g. myorg/my-plugin)"
+echo
+GITHUB_DEFAULT_REPO=""
+read -rp "  GitHub repo [blank to skip]: " GITHUB_DEFAULT_REPO
+if [[ -n "$GITHUB_DEFAULT_REPO" ]]; then
+    ok "Bug fix pipeline will target: $GITHUB_DEFAULT_REPO"
+else
+    ok "Skipping GitHub integration (add GITHUB_DEFAULT_REPO to .env later)."
+fi
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 echo
@@ -349,7 +363,18 @@ if [[ -z "$FOUND_WP_PATH" ]]; then
         echo "  Tip: use an Application Password (WP Admin → Users → Profile)"
         read -rsp "  Admin password or Application Password: " WP_ADMIN_PASSWORD; echo
         [[ -z "$WP_ADMIN_PASSWORD" ]] && die "Password is required."
+        echo
+        warn "Remote mode: the agent uses the REST API and bridge plugin to manage WordPress."
+        echo "    WP-CLI runs remotely through the bridge plugin (not locally)."
+        echo "    You must install the bridge plugin on the remote server (shown at the end)."
     fi
+fi
+
+# For remote WP, create an empty placeholder so the Docker volume mount doesn't fail.
+# docker-compose uses ${WP_PATH:-/var/www/html}, so we set a real but empty path.
+if [[ "$WP_REMOTE" == "true" ]]; then
+    WP_PATH="/tmp/wp-remote-placeholder"
+    mkdir -p "$WP_PATH"
 fi
 
 # Adjust step count now that we know whether WP needs installing
@@ -358,6 +383,7 @@ fi
 LITELLM_MASTER_KEY="sk-$(openssl rand -hex 24)"
 BRIDGE_SECRET="$(openssl rand -hex 32)"
 MCP_ENV_SECRET="$(openssl rand -hex 32)"
+INBOUND_SECRET="$(openssl rand -hex 32)"
 
 echo
 ok "Configuration collected."
@@ -613,6 +639,9 @@ WP_APP_PASSWORD=${WP_APP_PASSWORD}
 WP_PATH=${WP_PATH}
 BRIDGE_SECRET=${BRIDGE_SECRET}
 MCP_ENV_SECRET=${MCP_ENV_SECRET}
+
+GITHUB_DEFAULT_REPO=${GITHUB_DEFAULT_REPO}
+INBOUND_SECRET=${INBOUND_SECRET}
 EOF
     chmod 600 .env
 }
@@ -625,7 +654,9 @@ _update_gitignore() {
 task "Updating .gitignore" _update_gitignore
 
 task "Creating directories" \
-    mkdir -p squid litellm agent telegram-bot greenclaw-config wordpress-bridge-plugin
+    mkdir -p squid litellm agent telegram-bot greenclaw-config/skills/scripts \
+             greenclaw-config/skills/greenlight-instructions \
+             wordpress-bridge-plugin searxng mcp-runner
 
 # When WordPress is local, MariaDB defaults to listening on localhost only.
 # The agent runs in a Docker container and reaches the host via host.docker.internal.
@@ -718,7 +749,7 @@ task "Starting all containers" \
 
 # ── Wait for healthy with a single updating line ───────────────────────────────
 echo
-SERVICES=("greenclaw-squid" "greenclaw-litellm" "greenclaw-agent" "greenclaw-bot")
+SERVICES=("greenclaw-squid" "greenclaw-litellm" "greenclaw-agent" "greenclaw-bot" "greenclaw-mcp-runner" "greenclaw-relay" "greenclaw-searxng" "greenclaw-browser")
 TOTAL_SVC=${#SERVICES[@]}
 MAX_WAIT=120
 INTERVAL=5
@@ -761,7 +792,9 @@ if [[ "$WP_REMOTE" == "true" ]]; then
     echo "    1. Copy wordpress-bridge-plugin/greenclaw-wp-bridge.php to the remote server"
     echo "       into: wp-content/plugins/greenclaw-wp-bridge/"
     echo "    2. Activate in WP Admin → Plugins"
-    echo "    3. Settings → GreenClaw Bridge → paste secret below"
+    echo "    3. Settings → GreenClaw Bridge → paste this secret:"
+    echo "       ${BRIDGE_SECRET}"
+    echo "    Without the bridge plugin, WP-CLI commands won't work (REST API still works)."
 
 elif [[ -n "$WP_PATH" ]] && [[ -f "$PLUGIN_FILE" ]]; then
 
@@ -847,6 +880,13 @@ fi
 [[ -n "$OPENROUTER_API_KEY" ]] \
     && echo "  OpenRouter:         ✓ enabled  (use /model openrouter/<slug> in Telegram)" \
     || echo "  OpenRouter:         ✗ disabled  (add OPENROUTER_API_KEY to .env to enable)"
+echo "  Web search:         ✓ SearXNG  (self-hosted, no API key needed)"
+echo "  Screenshots:        ✓ Browserless  (headless Chrome)"
+echo "  MCP tools:          ✓ MCP Runner  (install with /mcp in Telegram)"
+echo "  Agent memory:       ✓ AGENT.md  (tell bot to remember preferences)"
+[[ -n "$GITHUB_DEFAULT_REPO" ]] \
+    && echo "  Bug fix pipeline:   ✓ $GITHUB_DEFAULT_REPO" \
+    || echo "  Bug fix pipeline:   ✗ disabled  (add GITHUB_DEFAULT_REPO to .env)"
 echo
 
 echo -e "  ${BOLD}━━━ Telegram Bot ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

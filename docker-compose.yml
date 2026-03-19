@@ -93,7 +93,7 @@ services:
       # For any tool that downloads from the internet (plugins, images)
       HTTPS_PROXY: "http://greenclaw-squid:3128"
       HTTP_PROXY: "http://greenclaw-squid:3128"
-      NO_PROXY: "greenclaw-litellm,greenclaw-squid,greenclaw-bot,greenclaw-mcp-runner,host.docker.internal,localhost,127.0.0.1,172.28.0.0/16"
+      NO_PROXY: "greenclaw-litellm,greenclaw-squid,greenclaw-bot,greenclaw-mcp-runner,greenclaw-searxng,greenclaw-browser,host.docker.internal,localhost,127.0.0.1,172.28.0.0/16"
       PYTHONUNBUFFERED: "1"
       SKILL_FILE: "/app/SKILL.md"
       WP_PATH: "/wordpress"
@@ -186,6 +186,58 @@ services:
     depends_on:
       greenclaw-agent:
         condition: service_healthy
+
+  # ── Search Engine ─────────────────────────────────────────────────────────
+  # Self-hosted metasearch (SearXNG). No API keys needed.
+  # Agent calls its JSON API to search the web.
+  greenclaw-searxng:
+    image: searxng/searxng:latest
+    container_name: greenclaw-searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: "http://localhost:8080/"
+    mem_limit: 256m
+    networks:
+      agent-internal: {}   # Agent reaches it here
+      proxy-external: {}   # Needs internet for DNS + search engine queries
+    depends_on:
+      greenclaw-squid:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/healthz || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Headless Browser ─────────────────────────────────────────────────────
+  # Chromium for screenshots and page rendering. Agent calls its HTTP API.
+  greenclaw-browser:
+    image: ghcr.io/browserless/chromium
+    container_name: greenclaw-browser
+    restart: unless-stopped
+    environment:
+      TIMEOUT: "60000"
+      CONCURRENT: "3"
+      LAUNCH_ARGS: '["--no-sandbox","--disable-dev-shm-usage"]'
+      TOKEN: "browserless"
+    extra_hosts:
+      - "host.docker.internal:172.28.0.1"
+    mem_limit: 1024m
+    networks:
+      agent-internal: {}   # Agent reaches it here
+      proxy-external: {}   # Chrome needs internet to load pages
+    depends_on:
+      greenclaw-squid:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e 'fetch(\"http://localhost:3000/pressure?token=browserless\").then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))'"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   # ── Telegram Bot ──────────────────────────────────────────────────────────
   # User interface. Relays Telegram messages to the agent.
