@@ -41,6 +41,7 @@ export interface TaskProfile {
   model?: string;
   singleShot?: boolean;
   effort?: "low" | "medium" | "high";
+  excludeTools?: string[];
 }
 
 export interface MarkdownSkill {
