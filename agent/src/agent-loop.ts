@@ -217,7 +217,8 @@ export async function* runAgent(
         // Retry transient errors (rate limit, server errors) up to 2 times with backoff
         const status = firstErr?.status ?? firstErr?.statusCode ?? 0;
         const isTransient =
-          [429, 500, 502, 503, 504].includes(status) || /rate.?limit|timeout|overloaded/i.test(errMsg);
+          [429, 500, 502, 503, 504].includes(status) ||
+          /rate.?limit|timeout|overloaded|connection.?error|ECONNRESET|ECONNREFUSED|socket hang up/i.test(errMsg);
 
         if (isTransient && consecutiveErrors < 2) {
           const delay = (consecutiveErrors + 1) * 5000;
