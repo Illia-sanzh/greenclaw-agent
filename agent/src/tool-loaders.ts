@@ -224,13 +224,16 @@ export async function loadWpAbilities(): Promise<OpenAI.Chat.ChatCompletionTool[
 }
 
 export function getToolsForProfile(profile: TaskProfile): OpenAI.Chat.ChatCompletionTool[] {
+  const exclude = new Set(profile.excludeTools ?? []);
+  const allAvailable = [...TOOLS, ...state.cachedCustomTools, ...state.cachedMcpTools, ...state.cachedWpAbilityTools];
+
   if (profile.tools.includes("*")) {
-    return [...TOOLS, ...state.cachedCustomTools, ...state.cachedMcpTools, ...state.cachedWpAbilityTools];
+    return exclude.size > 0 ? allAvailable.filter((t) => !exclude.has(t.function.name)) : allAvailable;
   }
   const selected: OpenAI.Chat.ChatCompletionTool[] = [];
-  const allAvailable = [...TOOLS, ...state.cachedCustomTools, ...state.cachedMcpTools, ...state.cachedWpAbilityTools];
   for (const tool of allAvailable) {
     const name = tool.function.name;
+    if (exclude.has(name)) continue;
     for (const pattern of profile.tools) {
       if (name === pattern || name.startsWith(pattern)) {
         selected.push(tool);

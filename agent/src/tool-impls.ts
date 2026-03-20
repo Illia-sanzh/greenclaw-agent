@@ -429,7 +429,7 @@ export async function screenshot(url: string, fullPage = false): Promise<string>
 
   try {
     const resp = await axios.post(
-      `${BROWSER_URL}/chrome/screenshot?token=${BROWSER_TOKEN}`,
+      `${BROWSER_URL}/screenshot?token=${BROWSER_TOKEN}`,
       {
         url: screenshotUrl,
         options: { fullPage, type: "png" },

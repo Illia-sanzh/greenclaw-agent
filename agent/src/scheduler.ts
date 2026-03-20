@@ -3,7 +3,8 @@ import schedule from "node-schedule";
 import { log, SCHEDULE_DB, DEFAULT_MODEL } from "./config";
 import { notifyTelegram } from "./notify";
 import { logAudit } from "./audit";
-import type { StoredJob } from "./types";
+import { DEFAULT_PROFILE } from "./profiles";
+import type { StoredJob, TaskProfile } from "./types";
 
 export class PersistentScheduler {
   private db: Database.Database;
@@ -122,7 +123,13 @@ async function executeScheduledTask(taskLabel: string, taskText: string): Promis
   let elapsed = 0;
   try {
     const { runAgent } = await import("./agent-loop");
-    for await (const event of runAgent(taskText)) {
+    // Exclude schedule_task to prevent recursive scheduling
+    const schedulerProfile: TaskProfile = {
+      ...DEFAULT_PROFILE,
+      name: "scheduler",
+      excludeTools: ["schedule_task"],
+    };
+    for await (const event of runAgent(taskText, undefined, [], schedulerProfile)) {
       if (event.type === "result") {
         resultText = event.text ?? "(no result)";
         elapsed = event.elapsed ?? 0;
