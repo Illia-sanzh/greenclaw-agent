@@ -457,6 +457,7 @@ export async function screenshot(url: string, fullPage = false): Promise<string>
       {
         url: screenshotUrl,
         options: { fullPage, type: "png" },
+        viewport: { width: 1440, height: 900, deviceScaleFactor: 1 },
         gotoOptions: { waitUntil: "networkidle2", timeout: 30_000 },
       },
       {
