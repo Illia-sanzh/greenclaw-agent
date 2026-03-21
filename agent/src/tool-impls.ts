@@ -41,6 +41,21 @@ export function runCommand(command: string): string {
     if (cmdLower.includes(f)) return `ERROR: Command '${f}' is blocked for safety reasons.`;
   }
 
+  // Log WP content operations for debugging
+  if (cmdLower.includes("wp post update") || cmdLower.includes("wp post create")) {
+    const hasFile = command.match(/\s(\/tmp\/\S+)/);
+    if (hasFile) {
+      try {
+        const content = fs.readFileSync(hasFile[1], "utf8").slice(0, 200);
+        const isGS = content.includes("greenshift-blocks");
+        const isHTML = content.includes("wp:html");
+        log.info(
+          `[wp-save] File: ${hasFile[1]}, isGS: ${isGS}, isHTML: ${isHTML}, size: ${fs.statSync(hasFile[1]).size}`,
+        );
+      } catch {}
+    }
+  }
+
   try {
     const result = spawnSync(command, {
       shell: true,
@@ -227,6 +242,15 @@ export function writeFile(filePath: string, content: string, append: boolean): s
   const allowed = WRITABLE_PATHS.some((p) => normalized.startsWith(path.resolve(p)));
   if (!allowed) return `ERROR: Can only write to: ${WRITABLE_PATHS.join(", ")}`;
   if (!content) return "ERROR: No content provided.";
+
+  // Detect wp:html usage for debugging
+  if (content.includes("wp:html")) {
+    log.warn(`[write_file] WARNING: Writing wp:html block to ${normalized} (${content.length} chars)`);
+  }
+  if (content.includes("greenshift-blocks")) {
+    log.info(`[write_file] Writing GS blocks to ${normalized} (${content.length} chars)`);
+  }
+
   try {
     fs.mkdirSync(path.dirname(normalized), { recursive: true });
     if (append) {

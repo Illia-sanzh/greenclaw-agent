@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 // Post-process converted Greenshift blocks:
-// 1. Add "CSSRender":"1" to all blocks with styleAttributes or dynamicGClasses
-// 2. Extract customJs scripts and output a save command
+// 1. Add "CSSRender":"1" to all blocks that need it (styleAttributes or dynamicGClasses)
+// 2. Detect customJs scripts and output save command
+//
+// Always writes to a file and outputs a summary (never raw blocks to stdout)
 //
 // Usage:
 //   node postprocess.js input.txt -o output.txt
-//   node postprocess.js input.txt                  # stdout
-//   cat input.txt | node postprocess.js
 
 'use strict';
 
@@ -15,89 +15,75 @@ const fs = require('fs');
 const path = require('path');
 
 function addCSSRender(content) {
-  // Match block comment openers: <!-- wp:greenshift-blocks/element {JSON} -->
-  return content.replace(
-    /<!-- wp:(greenshift-blocks\/\w+) (\{[^}]*(?:\{[^}]*\}[^}]*)*\}) -->/g,
-    (match, blockType, jsonStr) => {
-      // Only add to blocks that have styleAttributes or dynamicGClasses
-      if (
-        (jsonStr.includes('"styleAttributes"') || jsonStr.includes('"dynamicGClasses"')) &&
-        !jsonStr.includes('"CSSRender"')
-      ) {
-        // Insert CSSRender before the closing brace
-        const patched = jsonStr.replace(/\}$/, ',"CSSRender":"1"}');
-        return `<!-- wp:${blockType} ${patched} -->`;
-      }
-      return match;
-    }
-  );
+  let added = 0;
+  let total = 0;
+
+  // Process line by line — block comments are always single-line
+  const lines = content.split('\n');
+  const result = lines.map(line => {
+    // Match opening block comment for greenshift-blocks
+    if (!line.startsWith('<!-- wp:greenshift-blocks/')) return line;
+    total++;
+
+    const needsCSSRender =
+      (line.includes('"styleAttributes"') || line.includes('"dynamicGClasses"')) &&
+      !line.includes('"CSSRender"');
+
+    if (!needsCSSRender) return line;
+
+    // Find the JSON object boundary: first { after block name, last } before -->
+    const jsonStart = line.indexOf('{');
+    const jsonEnd = line.lastIndexOf('}');
+    if (jsonStart < 0 || jsonEnd < 0 || jsonEnd <= jsonStart) return line;
+
+    // Insert "CSSRender":"1" before the final }
+    const before = line.slice(0, jsonEnd);
+    const after = line.slice(jsonEnd);
+    added++;
+    return before + ',"CSSRender":"1"' + after;
+  });
+
+  return { content: result.join('\n'), added, total };
 }
 
-function extractScripts(content) {
-  // Find all blocks with customJsEnabled and extract id + customJs pairs
-  const scripts = {};
-  const blockPattern = /<!-- wp:greenshift-blocks\/\w+ (\{[\s\S]*?\}) -->/g;
-  let m;
-  while ((m = blockPattern.exec(content)) !== null) {
-    try {
-      const attrs = JSON.parse(m[1]);
-      if (attrs.customJsEnabled && attrs.id && attrs.customJs) {
-        scripts[attrs.id] = attrs.customJs;
-      }
-    } catch {
-      // JSON too complex for simple parse — try regex extraction
-      const idMatch = m[1].match(/"id"\s*:\s*"([^"]+)"/);
-      const jsMatch = m[1].match(/"customJs"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-      const enabledMatch = m[1].match(/"customJsEnabled"\s*:\s*true/);
-      if (idMatch && jsMatch && enabledMatch) {
-        scripts[idMatch[1]] = jsMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-      }
-    }
-  }
-  return scripts;
+function detectScripts(content) {
+  // Check if any blocks have customJsEnabled
+  const hasScripts = content.includes('"customJsEnabled":true');
+  const scriptBlockCount = (content.match(/"customJsEnabled":true/g) || []).length;
+  return { hasScripts, scriptBlockCount };
 }
 
 // --- CLI ---
 const args = process.argv.slice(2);
 
 if (args.includes('--help') || args.includes('-h')) {
-  console.log(`Usage:
-  node postprocess.js <input.txt>              Process file, output to stdout
-  node postprocess.js <input.txt> -o out.txt   Process file, write to out.txt
-  cat file.txt | node postprocess.js           Process from stdin
-
-Adds CSSRender:"1" to all Greenshift blocks that need it.
-If blocks contain custom scripts, outputs a WP-CLI command to stderr.`);
+  console.log(`Usage: node postprocess.js <input.txt> -o <output.txt>
+Adds CSSRender:"1" to Greenshift blocks and writes result to output file.`);
   process.exit(0);
 }
 
-let input;
 const fileArg = args.find(a => a !== '-o' && !a.startsWith('-') && args[args.indexOf(a) - 1] !== '-o');
-
-if (fileArg) {
-  input = fs.readFileSync(path.resolve(fileArg), 'utf8');
-} else if (!process.stdin.isTTY) {
-  input = fs.readFileSync('/dev/stdin', 'utf8');
-} else {
-  console.error('Error: No input file or stdin');
+if (!fileArg) {
+  console.error('[postprocess] ERROR: No input file specified');
   process.exit(1);
 }
 
-const result = addCSSRender(input);
-const scripts = extractScripts(result);
-
-// Output processed blocks
 const outIdx = args.indexOf('-o');
-if (outIdx !== -1 && args[outIdx + 1]) {
-  const outPath = path.resolve(args[outIdx + 1]);
-  fs.writeFileSync(outPath, result, 'utf8');
-  console.error(`Written to ${outPath}`);
-} else {
-  process.stdout.write(result);
-}
+const outPath = (outIdx !== -1 && args[outIdx + 1])
+  ? path.resolve(args[outIdx + 1])
+  : path.resolve(fileArg.replace(/\.[^.]+$/, '') + '_final.txt');
 
-// If scripts found, output the save command to stderr
-if (Object.keys(scripts).length > 0) {
-  const json = JSON.stringify(scripts);
-  console.error(`\n[postprocess] Scripts detected. Save with:\nEXISTING=$(wp option get gspb_block_js --format=json 2>/dev/null || echo '{}')\nMERGED=$(node -e "const e=JSON.parse(process.argv[1]||'{}');const n=${json.replace(/'/g, "\\'")};process.stdout.write(JSON.stringify({...e,...n}))" "$EXISTING")\nwp option update gspb_block_js "$MERGED" --format=json`);
-}
+const input = fs.readFileSync(path.resolve(fileArg), 'utf8');
+const { content: result, added, total } = addCSSRender(input);
+const { hasScripts, scriptBlockCount } = detectScripts(result);
+
+fs.writeFileSync(outPath, result, 'utf8');
+
+// Output summary (this is what the agent sees)
+const stats = `[postprocess] ${total} GS blocks found, CSSRender added to ${added} blocks`;
+const fileInfo = `Output: ${outPath} (${result.length} bytes)`;
+const scriptInfo = hasScripts
+  ? `\n[postprocess] ${scriptBlockCount} block(s) have custom scripts — save them with:\nEXISTING=$(wp option get gspb_block_js --format=json 2>/dev/null || echo '{}')\n# Then merge and update (see validate-scripts.md)`
+  : '';
+
+console.log(`${stats}\n${fileInfo}${scriptInfo}\nUse: wp post update <POST_ID> ${outPath}`);
