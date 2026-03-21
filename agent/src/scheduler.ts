@@ -26,8 +26,32 @@ export class PersistentScheduler {
 
   start(): void {
     const rows = this.db.prepare("SELECT * FROM scheduled_jobs").all() as StoredJob[];
-    for (const row of rows) this._register(row);
-    log.info(`[scheduler] Loaded ${rows.length} job(s) from DB`);
+    // Deduplicate: keep only the newest job per cron_expr (same schedule = same job)
+    const seen = new Map<string, StoredJob>();
+    const dupes: string[] = [];
+    for (const row of rows) {
+      if (!row.cron_expr) {
+        // One-off jobs: always keep
+        this._register(row);
+        continue;
+      }
+      const key = row.cron_expr;
+      const existing = seen.get(key);
+      if (existing) {
+        // Keep the newer one (higher created_at), remove the older
+        const keepExisting = (existing.created_at ?? "") >= (row.created_at ?? "");
+        const dupe = keepExisting ? row : existing;
+        const keeper = keepExisting ? existing : row;
+        dupes.push(dupe.id);
+        this._removeFromDb(dupe.id);
+        seen.set(key, keeper);
+      } else {
+        seen.set(key, row);
+      }
+    }
+    for (const job of seen.values()) this._register(job);
+    if (dupes.length > 0) log.info(`[scheduler] Removed ${dupes.length} duplicate job(s)`);
+    log.info(`[scheduler] Loaded ${seen.size} job(s) from DB`);
   }
 
   private _register(job: StoredJob): void {
