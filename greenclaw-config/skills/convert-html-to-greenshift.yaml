@@ -1,11 +1,10 @@
 name: convert_html_to_greenshift
 description: >
-  Convert an HTML file to Greenshift/GreenLight block format.
-  The HTML file must already exist on disk (use write_file to create it first).
-  Returns ready-to-paste WordPress Gutenberg block code.
-  Use this after building clean HTML for Greenshift page designs.
+  Convert HTML to Greenshift blocks with CSSRender. Writes result to /tmp/gs_output.txt.
+  After this, run: wp post update <ID> /tmp/gs_output.txt
+  Do NOT read or modify the output file — use it directly.
 type: command
-command: "node /app/config/skills/scripts/convert.js {file_path}"
+command: "node /app/config/skills/scripts/convert.js {file_path} -o /tmp/_gs_raw.txt && node /app/config/skills/scripts/postprocess.js /tmp/_gs_raw.txt -o /tmp/gs_output.txt"
 parameters:
   - name: file_path
     type: string

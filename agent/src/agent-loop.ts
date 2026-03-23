@@ -217,7 +217,8 @@ export async function* runAgent(
         // Retry transient errors (rate limit, server errors) up to 2 times with backoff
         const status = firstErr?.status ?? firstErr?.statusCode ?? 0;
         const isTransient =
-          [429, 500, 502, 503, 504].includes(status) || /rate.?limit|timeout|overloaded/i.test(errMsg);
+          [429, 500, 502, 503, 504].includes(status) ||
+          /rate.?limit|timeout|overloaded|connection.?error|ECONNRESET|ECONNREFUSED|socket hang up/i.test(errMsg);
 
         if (isTransient && consecutiveErrors < 2) {
           const delay = (consecutiveErrors + 1) * 5000;
@@ -295,6 +296,18 @@ export async function* runAgent(
         log.warn(
           `[agent] All tool_calls: ${JSON.stringify(msg.tool_calls?.map((t) => ({ name: t.function.name, argsLen: t.function.arguments?.length ?? 0 })))}`,
         );
+      }
+
+      // Block tool calls not in the profile's allowed list
+      const allowedNames = new Set(profileTools.map((t) => t.function.name));
+      if (!allowedNames.has(fnName)) {
+        log.warn(`[agent] Blocked disallowed tool call: ${fnName}`);
+        messages.push({
+          role: "tool",
+          content: `ERROR: Tool "${fnName}" is not available.`,
+          tool_call_id: tc.id,
+        } as any);
+        continue;
       }
 
       yield { type: "progress", text: toolLabel(fnName, fnArgs) };

@@ -72,8 +72,8 @@ Categories:
 - general: anything that doesn't fit above, or complex multi-domain tasks
 
 IMPORTANT — follow-up detection:
-If the conversation history shows the user was just working on a design/content task (web_design, greenshift, plugin_dev) and the new message is a follow-up like "change X", "make it Y", "update the Z", "fix the colors", "add a section", keep the SAME category as the previous task. Short modification requests after a creative task are continuations, not new tasks.
-${lastProfile ? `The previous task used the "${lastProfile}" profile.` : ""}
+If the conversation history shows the user was just working on a design/content task (web_design, greenshift, plugin_dev) and the new message is a follow-up, keep the SAME category as the previous task. Follow-ups include: "change X", "make it Y", "I don't like it", "try again", "create variants", "show me alternatives", "send screenshots", "make it darker/bigger/different", "add/remove a section", or any reference to the previous result. When in doubt, keep the previous category.
+${lastProfile ? `The previous task used the "${lastProfile}" profile — prefer this unless the message is clearly a different domain.` : ""}
 
 Respond with ONLY the category name, nothing else.`;
 

@@ -46,7 +46,10 @@ async function dispatchSkill(toolName: string, args: Record<string, any>): Promi
   if (skillType === "command") {
     let cmd = skillData.command ?? "";
     for (const [k, v] of Object.entries(filteredArgs)) cmd = cmd.replace(`{${k}}`, String(v));
-    return runCommand(cmd);
+    log.info(`[skill] Running: ${rawName} → ${cmd.slice(0, 200)}`);
+    const result = runCommand(cmd);
+    log.info(`[skill] Result: ${rawName} → ${result.slice(0, 300)}`);
+    return result;
   }
 
   if (skillType === "http" || skillType === "webhook") {

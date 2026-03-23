@@ -143,6 +143,25 @@ All configuration lives in `.env`. See [.env.template](.env.template) for the fu
 - `WP_URL` and WordPress credentials
 - `LITELLM_MASTER_KEY` (generate: `openssl rand -hex 32`)
 
+## Distribution
+
+Build a clean archive to share with anyone — no secrets, no git history, no dev files:
+
+```bash
+bash dist.sh            # uses latest git tag
+bash dist.sh v1.0.3     # explicit version
+```
+
+Outputs `/tmp/greenclaw-agent-v1.0.3.tar.gz`. The recipient just runs:
+
+```bash
+tar xzf greenclaw-agent-v1.0.3.tar.gz
+cd greenclaw-agent-v1.0.3
+sudo bash install.sh
+```
+
+The script scans for leaked secrets before packaging.
+
 ## Development
 
 ```bash

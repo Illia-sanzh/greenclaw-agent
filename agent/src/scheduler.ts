@@ -3,7 +3,8 @@ import schedule from "node-schedule";
 import { log, SCHEDULE_DB, DEFAULT_MODEL } from "./config";
 import { notifyTelegram } from "./notify";
 import { logAudit } from "./audit";
-import type { StoredJob } from "./types";
+import { DEFAULT_PROFILE } from "./profiles";
+import type { StoredJob, TaskProfile } from "./types";
 
 export class PersistentScheduler {
   private db: Database.Database;
@@ -25,8 +26,44 @@ export class PersistentScheduler {
 
   start(): void {
     const rows = this.db.prepare("SELECT * FROM scheduled_jobs").all() as StoredJob[];
-    for (const row of rows) this._register(row);
-    log.info(`[scheduler] Loaded ${rows.length} job(s) from DB`);
+    // Deduplicate by cron_expr AND by similar task name (normalized)
+    const seen = new Map<string, StoredJob>();
+    const dupes: string[] = [];
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/[^a-z]+/g, " ")
+        .trim();
+    for (const row of rows) {
+      if (!row.cron_expr) {
+        this._register(row);
+        continue;
+      }
+      // Dedup by cron OR by similar name (catches dupes with different cron times)
+      const cronKey = `cron:${row.cron_expr}`;
+      const nameKey = `name:${normalize(row.name)}`;
+      const existingByCron = seen.get(cronKey);
+      const existingByName = seen.get(nameKey);
+      const existing = existingByCron ?? existingByName;
+      if (existing) {
+        const keepExisting = (existing.created_at ?? "") >= (row.created_at ?? "");
+        const dupe = keepExisting ? row : existing;
+        const keeper = keepExisting ? existing : row;
+        dupes.push(dupe.id);
+        this._removeFromDb(dupe.id);
+        seen.set(cronKey, keeper);
+        seen.set(nameKey, keeper);
+      } else {
+        seen.set(cronKey, row);
+        seen.set(nameKey, row);
+      }
+    }
+    // Collect unique jobs (values may appear under both keys)
+    const uniqueJobs = new Map<string, StoredJob>();
+    for (const job of seen.values()) uniqueJobs.set(job.id, job);
+    for (const job of uniqueJobs.values()) this._register(job);
+    if (dupes.length > 0) log.info(`[scheduler] Removed ${dupes.length} duplicate job(s)`);
+    log.info(`[scheduler] Loaded ${uniqueJobs.size} job(s) from DB`);
   }
 
   private _register(job: StoredJob): void {
@@ -122,7 +159,14 @@ async function executeScheduledTask(taskLabel: string, taskText: string): Promis
   let elapsed = 0;
   try {
     const { runAgent } = await import("./agent-loop");
-    for await (const event of runAgent(taskText)) {
+    // Exclude schedule_task to prevent recursive scheduling
+    const schedulerProfile: TaskProfile = {
+      ...DEFAULT_PROFILE,
+      name: "scheduler",
+      excludeTools: ["schedule_task"],
+    };
+    const prefixedTask = `[SCHEDULED TASK — do NOT create new scheduled tasks, just execute the work]\n${taskText}`;
+    for await (const event of runAgent(prefixedTask, undefined, [], schedulerProfile)) {
       if (event.type === "result") {
         resultText = event.text ?? "(no result)";
         elapsed = event.elapsed ?? 0;

@@ -164,7 +164,7 @@ export const TASK_PROFILES: Record<string, TaskProfile> = {
     ],
     knowledgePatterns: ["greenlight", "greenshift", "block", "gutenberg"],
     skillFileSections: ["capabilities", "wpcli", "safety", "content_formatting", "web_design_workflow"],
-    maxSteps: 60,
+    maxSteps: 80,
     maxTokens: 16384,
     maxOutputChars: 12000,
   },
