@@ -298,6 +298,18 @@ export async function* runAgent(
         );
       }
 
+      // Block tool calls not in the profile's allowed list
+      const allowedNames = new Set(profileTools.map((t) => t.function.name));
+      if (!allowedNames.has(fnName)) {
+        log.warn(`[agent] Blocked disallowed tool call: ${fnName}`);
+        messages.push({
+          role: "tool",
+          content: `ERROR: Tool "${fnName}" is not available.`,
+          tool_call_id: tc.id,
+        } as any);
+        continue;
+      }
+
       yield { type: "progress", text: toolLabel(fnName, fnArgs) };
 
       log.info(`[agent] Tool call: ${fnName}(${Object.keys(fnArgs).join(", ")})`);

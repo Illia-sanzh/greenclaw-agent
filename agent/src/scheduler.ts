@@ -26,32 +26,44 @@ export class PersistentScheduler {
 
   start(): void {
     const rows = this.db.prepare("SELECT * FROM scheduled_jobs").all() as StoredJob[];
-    // Deduplicate: keep only the newest job per cron_expr (same schedule = same job)
+    // Deduplicate by cron_expr AND by similar task name (normalized)
     const seen = new Map<string, StoredJob>();
     const dupes: string[] = [];
+    const normalize = (s: string) =>
+      s
+        .toLowerCase()
+        .replace(/[^a-z]+/g, " ")
+        .trim();
     for (const row of rows) {
       if (!row.cron_expr) {
-        // One-off jobs: always keep
         this._register(row);
         continue;
       }
-      const key = row.cron_expr;
-      const existing = seen.get(key);
+      // Dedup by cron OR by similar name (catches dupes with different cron times)
+      const cronKey = `cron:${row.cron_expr}`;
+      const nameKey = `name:${normalize(row.name)}`;
+      const existingByCron = seen.get(cronKey);
+      const existingByName = seen.get(nameKey);
+      const existing = existingByCron ?? existingByName;
       if (existing) {
-        // Keep the newer one (higher created_at), remove the older
         const keepExisting = (existing.created_at ?? "") >= (row.created_at ?? "");
         const dupe = keepExisting ? row : existing;
         const keeper = keepExisting ? existing : row;
         dupes.push(dupe.id);
         this._removeFromDb(dupe.id);
-        seen.set(key, keeper);
+        seen.set(cronKey, keeper);
+        seen.set(nameKey, keeper);
       } else {
-        seen.set(key, row);
+        seen.set(cronKey, row);
+        seen.set(nameKey, row);
       }
     }
-    for (const job of seen.values()) this._register(job);
+    // Collect unique jobs (values may appear under both keys)
+    const uniqueJobs = new Map<string, StoredJob>();
+    for (const job of seen.values()) uniqueJobs.set(job.id, job);
+    for (const job of uniqueJobs.values()) this._register(job);
     if (dupes.length > 0) log.info(`[scheduler] Removed ${dupes.length} duplicate job(s)`);
-    log.info(`[scheduler] Loaded ${seen.size} job(s) from DB`);
+    log.info(`[scheduler] Loaded ${uniqueJobs.size} job(s) from DB`);
   }
 
   private _register(job: StoredJob): void {
@@ -153,7 +165,8 @@ async function executeScheduledTask(taskLabel: string, taskText: string): Promis
       name: "scheduler",
       excludeTools: ["schedule_task"],
     };
-    for await (const event of runAgent(taskText, undefined, [], schedulerProfile)) {
+    const prefixedTask = `[SCHEDULED TASK — do NOT create new scheduled tasks, just execute the work]\n${taskText}`;
+    for await (const event of runAgent(prefixedTask, undefined, [], schedulerProfile)) {
       if (event.type === "result") {
         resultText = event.text ?? "(no result)";
         elapsed = event.elapsed ?? 0;
