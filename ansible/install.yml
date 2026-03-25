@@ -1,0 +1,770 @@
+---
+# WordPress Telegram Agent — Ansible Installer
+#
+# Interactive mode (asks questions):
+#   ansible-playbook -i inventory.yml install.yml
+#
+# Non-interactive mode (pre-filled vars):
+#   ansible-playbook -i inventory.yml install.yml -e @group_vars/all.yml
+#
+# Idempotent: safe to run multiple times.
+
+- name: Deploy Greenclaw Agent
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_prompt:
+    - name: ai_provider
+      prompt: |
+
+        ╔══════════════════════════════════════════════════════╗
+        ║          WordPress Telegram Agent Installer           ║
+        ╚══════════════════════════════════════════════════════╝
+
+        AI Provider:
+          1) Anthropic Claude (recommended)
+          2) OpenAI ChatGPT
+          3) DeepSeek
+          4) Google Gemini
+          5) Multiple providers
+
+        Choose provider [1-5]
+      default: "1"
+      private: false
+
+    - name: primary_api_key
+      prompt: "Enter your AI provider API key"
+      private: true
+
+    - name: openrouter_api_key
+      prompt: "OpenRouter API key (optional, gives access to all LLMs — blank to skip)"
+      default: ""
+      private: true
+
+    - name: telegram_bot_token
+      prompt: "Telegram bot token (from @BotFather)"
+      private: false
+
+    - name: telegram_admin_user_id
+      prompt: "Your Telegram user ID (from @userinfobot)"
+      private: false
+
+    - name: wp_mode
+      prompt: |
+
+        WordPress setup:
+          1) Use existing WordPress on this server
+          2) Install WordPress from scratch
+          3) Connect to WordPress on a different server
+
+        Choose [1-3]
+      default: "1"
+      private: false
+
+    - name: wp_url_input
+      prompt: "WordPress URL (e.g. https://mysite.com) or domain for fresh install"
+      private: false
+
+    - name: wp_admin_user
+      prompt: "WordPress admin username"
+      default: "admin"
+      private: false
+
+    - name: wp_admin_password
+      prompt: "WordPress admin password (blank to auto-generate for fresh installs)"
+      private: true
+
+    - name: wp_admin_email
+      prompt: "Admin email (required for fresh installs, blank otherwise)"
+      default: ""
+      private: false
+
+    - name: monthly_budget_usd
+      prompt: "Monthly AI spend limit in USD"
+      default: "20"
+      private: false
+
+    - name: github_default_repo
+      prompt: "GitHub repo for bug fix pipeline (owner/repo format, blank to skip)"
+      default: ""
+      private: false
+
+    - name: greenclaw_path
+      prompt: "Install path on server"
+      default: "/opt/greenclaw-agent"
+      private: false
+
+  vars:
+    # Map provider choice to keys and models
+    _provider_map:
+      "1": { key_var: "anthropic_api_key", model: "claude-sonnet-4-6", fallback: "claude-sonnet-4-6" }
+      "2": { key_var: "openai_api_key", model: "gpt-5.4-mini", fallback: "gpt-5.4-mini" }
+      "3": { key_var: "deepseek_api_key", model: "deepseek-chat", fallback: "deepseek-chat" }
+      "4": { key_var: "gemini_api_key", model: "gemini-2.5-flash", fallback: "gemini-2.5-flash" }
+      "5": { key_var: "anthropic_api_key", model: "claude-sonnet-4-6", fallback: "deepseek-chat" }
+
+    _provider: "{{ _provider_map[ai_provider | default('1')] }}"
+    default_model: "{{ _provider.model }}"
+    fallback_model: "{{ _provider.fallback }}"
+
+    # Assign API key to the right variable
+    anthropic_api_key: "{{ primary_api_key if ai_provider in ['1', '5'] else '' }}"
+    openai_api_key: "{{ primary_api_key if ai_provider == '2' else '' }}"
+    deepseek_api_key: "{{ primary_api_key if ai_provider == '3' else '' }}"
+    gemini_api_key: "{{ primary_api_key if ai_provider == '4' else '' }}"
+
+    # Map wp_mode choice to semantic values
+    _wp_mode_map: { "1": "local_existing", "2": "local_fresh", "3": "remote" }
+    wp_mode_resolved: "{{ _wp_mode_map[wp_mode | default('1')] | default(wp_mode) }}"
+    wp_is_fresh: "{{ wp_mode_resolved == 'local_fresh' }}"
+    wp_is_remote: "{{ wp_mode_resolved == 'remote' }}"
+    wp_is_local: "{{ wp_mode_resolved != 'remote' }}"
+
+    # Derive URL and paths
+    wp_domain: "{{ wp_url_input | regex_replace('^https?://', '') | regex_replace('/$', '') }}"
+    wp_url: "{{ wp_url_input if wp_url_input.startswith('http') else 'http://' + wp_domain }}"
+    wp_path: "{{ '/var/www/html' if not wp_is_remote else '/tmp/wp-remote-placeholder' }}"
+    wp_title: "My WordPress Site"
+
+    # Defaults for optional features
+    auto_routing: false
+    fast_model: ""
+    smart_model: ""
+    whisper_enabled: false
+
+    # Generated secrets
+    litellm_master_key: "sk-{{ lookup('password', '/dev/null chars=hexdigits length=48') }}"
+    bridge_secret: "{{ lookup('password', '/dev/null chars=hexdigits length=64') }}"
+    mcp_env_secret: "{{ lookup('password', '/dev/null chars=hexdigits length=64') }}"
+    inbound_secret: "{{ lookup('password', '/dev/null chars=hexdigits length=64') }}"
+
+  pre_tasks:
+    - name: Validate required inputs
+      ansible.builtin.assert:
+        that:
+          - primary_api_key | length > 0
+          - telegram_bot_token | length > 0
+          - telegram_admin_user_id | length > 0
+          - wp_url_input | length > 0
+        fail_msg: "API key, Telegram token, user ID, and WordPress URL are all required."
+
+    - name: Validate fresh-install email
+      ansible.builtin.assert:
+        that:
+          - wp_admin_email | length > 0
+        fail_msg: "Admin email is required for fresh WordPress installs."
+      when: wp_is_fresh
+
+    - name: Generate WordPress admin password if not provided
+      ansible.builtin.set_fact:
+        wp_admin_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=18') }}"
+      when: wp_is_fresh and (wp_admin_password | default('') | length == 0)
+
+    - name: Generate database credentials
+      ansible.builtin.set_fact:
+        wp_db_name: "wp_{{ lookup('password', '/dev/null chars=hexdigits length=8') | lower }}"
+        wp_db_user: "wpuser_{{ lookup('password', '/dev/null chars=hexdigits length=8') | lower }}"
+        wp_db_pass: "{{ lookup('password', '/dev/null chars=hexdigits length=48') }}"
+      when: wp_is_fresh
+
+    - name: Detect existing WordPress installation
+      ansible.builtin.stat:
+        path: "{{ item }}/wp-config.php"
+      loop:
+        - /var/www/html
+        - /var/www/wordpress
+        - /srv/www/html
+        - /opt/wordpress
+      register: wp_detect
+      when: wp_mode_resolved == 'local_existing'
+
+    - name: Set wp_path from detected installation
+      ansible.builtin.set_fact:
+        wp_path: "{{ item.item }}"
+      loop: "{{ wp_detect.results | default([]) }}"
+      when:
+        - wp_mode_resolved == 'local_existing'
+        - item.stat.exists | default(false)
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Create remote WP placeholder directory
+      ansible.builtin.file:
+        path: /tmp/wp-remote-placeholder
+        state: directory
+        mode: "0755"
+      when: wp_is_remote
+
+    - name: Show configuration summary
+      ansible.builtin.debug:
+        msg: |
+          Configuration:
+            AI Provider:  {{ _provider.model }}
+            OpenRouter:   {{ 'yes' if openrouter_api_key | length > 0 else 'no' }}
+            WordPress:    {{ wp_mode_resolved }} ({{ wp_url }})
+            Budget:       ${{ monthly_budget_usd }}/month
+            Install path: {{ greenclaw_path }}
+
+  tasks:
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 1 — System packages
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Stop unattended-upgrades to release apt lock
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - unattended-upgrades
+        - apt-daily.service
+        - apt-daily-upgrade.service
+      failed_when: false
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - curl
+          - git
+          - openssl
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # ── Docker ───────────────────────────────────────────────────────────────
+
+    - name: Check if Docker is installed
+      ansible.builtin.command: docker --version
+      register: docker_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Docker
+      when: docker_check.rc != 0
+      block:
+        - name: Create Docker keyring directory
+          ansible.builtin.file:
+            path: /etc/apt/keyrings
+            state: directory
+            mode: "0755"
+
+        - name: Add Docker GPG key
+          ansible.builtin.get_url:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            dest: /etc/apt/keyrings/docker.asc
+            mode: "0644"
+
+        - name: Add Docker apt repository
+          ansible.builtin.apt_repository:
+            repo: >-
+              deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') }}
+              signed-by=/etc/apt/keyrings/docker.asc]
+              https://download.docker.com/linux/ubuntu
+              {{ ansible_distribution_release }} stable
+            filename: docker
+            state: present
+
+        - name: Install Docker packages
+          ansible.builtin.apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            update_cache: true
+
+        - name: Enable and start Docker
+          ansible.builtin.systemd:
+            name: docker
+            state: started
+            enabled: true
+
+    # ── WP-CLI ───────────────────────────────────────────────────────────────
+
+    - name: Check if WP-CLI is installed
+      ansible.builtin.command: wp --version
+      register: wpcli_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install WP-CLI
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        dest: /usr/local/bin/wp
+        mode: "0755"
+      when: wpcli_check.rc != 0
+
+    # ── Firewall ─────────────────────────────────────────────────────────────
+
+    - name: Install UFW
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+
+    - name: Reset UFW
+      community.general.ufw:
+        state: reset
+
+    - name: Set UFW default policies
+      community.general.ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: incoming, policy: deny }
+        - { direction: outgoing, policy: deny }
+
+    - name: Allow outbound services
+      community.general.ufw:
+        rule: allow
+        direction: out
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+      loop:
+        - { port: "22", proto: tcp }
+        - { port: "53", proto: any }
+        - { port: "123", proto: udp }
+        - { port: "80", proto: tcp }
+        - { port: "443", proto: tcp }
+
+    - name: Allow SSH inbound
+      community.general.ufw:
+        rule: allow
+        direction: in
+        port: "22"
+        proto: tcp
+
+    - name: Allow HTTP/HTTPS inbound (WordPress host)
+      community.general.ufw:
+        rule: allow
+        direction: in
+        port: "{{ item }}"
+        proto: tcp
+      loop: ["80", "443"]
+      when: wp_is_local
+
+    - name: Allow docker0 traffic
+      community.general.ufw:
+        rule: allow
+        interface: docker0
+        direction: "{{ item }}"
+      loop: [in, out]
+      failed_when: false
+
+    - name: Allow MariaDB from Docker agent subnet
+      community.general.ufw:
+        rule: allow
+        direction: in
+        from_ip: 172.28.0.0/16
+        port: "3306"
+        proto: tcp
+        comment: MariaDB from Docker agent subnet
+      failed_when: false
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+
+    # ── SSH hardening ────────────────────────────────────────────────────────
+
+    - name: Harden SSH configuration
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: "^#?PasswordAuthentication", line: "PasswordAuthentication no" }
+        - { regexp: "^#?ChallengeResponseAuthentication", line: "ChallengeResponseAuthentication no" }
+        - { regexp: "^#?UsePAM", line: "UsePAM no" }
+        - { regexp: "^#?PubkeyAuthentication", line: "PubkeyAuthentication yes" }
+      notify: Reload sshd
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 2 — WordPress (fresh install only)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Install WordPress stack
+      when: wp_is_fresh
+      block:
+        - name: Install Nginx
+          ansible.builtin.apt:
+            name: nginx
+            state: present
+          notify: Enable Nginx
+
+        - name: Install PHP 8.3 and extensions
+          ansible.builtin.apt:
+            name:
+              - php8.3-fpm
+              - php8.3-mysql
+              - php8.3-curl
+              - php8.3-gd
+              - php8.3-mbstring
+              - php8.3-xml
+              - php8.3-xmlrpc
+              - php8.3-soap
+              - php8.3-intl
+              - php8.3-zip
+              - php8.3-bcmath
+              - php8.3-imagick
+            state: present
+
+        - name: Install MariaDB
+          ansible.builtin.apt:
+            name: mariadb-server
+            state: present
+
+        - name: Enable and start MariaDB
+          ansible.builtin.systemd:
+            name: mariadb
+            state: started
+            enabled: true
+
+        - name: Create WordPress database
+          community.mysql.mysql_db:
+            name: "{{ wp_db_name }}"
+            encoding: utf8mb4
+            collation: utf8mb4_unicode_ci
+            state: present
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+
+        - name: Create WordPress database user
+          community.mysql.mysql_user:
+            name: "{{ wp_db_user }}"
+            password: "{{ wp_db_pass }}"
+            priv: "{{ wp_db_name }}.*:ALL"
+            host: localhost
+            state: present
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+
+        - name: Create WordPress directory
+          ansible.builtin.file:
+            path: "{{ wp_path }}"
+            state: directory
+            owner: www-data
+            group: www-data
+            mode: "0755"
+
+        - name: Deploy Nginx vhost
+          ansible.builtin.template:
+            src: templates/nginx-wordpress.j2
+            dest: /etc/nginx/sites-available/wordpress
+            mode: "0644"
+          notify: Reload Nginx
+
+        - name: Enable Nginx vhost
+          ansible.builtin.file:
+            src: /etc/nginx/sites-available/wordpress
+            dest: /etc/nginx/sites-enabled/wordpress
+            state: link
+          notify: Reload Nginx
+
+        - name: Remove default Nginx site
+          ansible.builtin.file:
+            path: /etc/nginx/sites-enabled/default
+            state: absent
+          notify: Reload Nginx
+
+        - name: Download WordPress core
+          ansible.builtin.command:
+            cmd: wp core download --path={{ wp_path }} --allow-root
+            creates: "{{ wp_path }}/wp-includes/version.php"
+
+        - name: Create wp-config.php
+          ansible.builtin.command:
+            cmd: >-
+              wp config create
+              --dbname={{ wp_db_name }}
+              --dbuser={{ wp_db_user }}
+              --dbpass={{ wp_db_pass }}
+              --dbhost=localhost
+              --path={{ wp_path }}
+              --allow-root
+            creates: "{{ wp_path }}/wp-config.php"
+
+        - name: Install WordPress
+          ansible.builtin.command:
+            cmd: >-
+              wp core install
+              --url={{ wp_url }}
+              --title="{{ wp_title }}"
+              --admin_user={{ wp_admin_user }}
+              --admin_password={{ wp_admin_password }}
+              --admin_email={{ wp_admin_email }}
+              --skip-email
+              --path={{ wp_path }}
+              --allow-root
+          register: wp_install_result
+          changed_when: "'already installed' not in wp_install_result.stdout"
+
+        - name: Set WordPress directory ownership
+          ansible.builtin.file:
+            path: "{{ wp_path }}"
+            owner: www-data
+            group: www-data
+            recurse: true
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 3 — MariaDB bridge (local WordPress only)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Bridge MariaDB to Docker network
+      when: wp_is_local
+      block:
+        - name: Check if MariaDB is running locally
+          ansible.builtin.systemd:
+            name: mariadb
+          register: mariadb_status
+          failed_when: false
+
+        - name: Configure MariaDB to listen on all interfaces
+          ansible.builtin.lineinfile:
+            path: "{{ item }}"
+            regexp: "^bind-address"
+            line: "bind-address = 0.0.0.0"
+          loop:
+            - /etc/mysql/mariadb.conf.d/50-server.cnf
+            - /etc/mysql/conf.d/mysql.cnf
+            - /etc/mysql/my.cnf
+            - /etc/mysql/mysql.conf.d/mysqld.cnf
+          failed_when: false
+          notify: Restart MariaDB
+          when: mariadb_status.status.ActiveState | default('') == 'active'
+
+        - name: Grant WordPress DB user from Docker subnet
+          community.mysql.mysql_user:
+            name: "{{ wp_db_user | default(lookup('pipe', 'wp config get DB_USER --path=' + wp_path + ' --allow-root 2>/dev/null || echo wpuser')) }}"
+            password: "{{ wp_db_pass | default(lookup('pipe', 'wp config get DB_PASSWORD --path=' + wp_path + ' --allow-root 2>/dev/null || echo changeme')) }}"
+            priv: "{{ (wp_db_name | default(lookup('pipe', 'wp config get DB_NAME --path=' + wp_path + ' --allow-root 2>/dev/null || echo wordpress'))) + '.*:ALL' }}"
+            host: "172.28.%"
+            state: present
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+          when: mariadb_status.status.ActiveState | default('') == 'active'
+          failed_when: false
+
+        - name: Make wp-config.php read DB_HOST from env var
+          ansible.builtin.replace:
+            path: "{{ wp_path }}/wp-config.php"
+            regexp: "define\\(\\s*'DB_HOST'\\s*,\\s*'[^']+'"
+            replace: "define('DB_HOST', getenv('WP_DB_HOST') ?: 'localhost'"
+          failed_when: false
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 4 — Write configuration
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Ensure project directory exists
+      ansible.builtin.file:
+        path: "{{ greenclaw_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sync project files to server
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../"
+        dest: "{{ greenclaw_path }}/"
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.claude"
+          - "--exclude=.github"
+          - "--exclude=ansible/group_vars/all.yml"
+          - "--exclude=.env"
+          - "--exclude=node_modules"
+          - "--exclude=agent/__tests__"
+          - "--exclude=vitest.config.ts"
+
+    - name: Write .env file
+      ansible.builtin.template:
+        src: templates/env.j2
+        dest: "{{ greenclaw_path }}/.env"
+        mode: "0600"
+
+    - name: Ensure .env is in .gitignore
+      ansible.builtin.lineinfile:
+        path: "{{ greenclaw_path }}/.gitignore"
+        line: "{{ item }}"
+        create: true
+        mode: "0644"
+      loop:
+        - .env
+        - install.log
+
+    - name: Create required subdirectories
+      ansible.builtin.file:
+        path: "{{ greenclaw_path }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - squid
+        - litellm
+        - agent
+        - telegram-bot
+        - greenclaw-config/skills/scripts
+        - greenclaw-config/skills/greenlight-instructions
+        - wordpress-bridge-plugin
+        - searxng
+        - mcp-runner
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 5 — Build and start Docker
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Pull LiteLLM image
+      community.docker.docker_image:
+        name: ghcr.io/berriai/litellm:main-stable
+        source: pull
+      failed_when: false
+
+    - name: Build Docker images
+      ansible.builtin.command:
+        cmd: docker compose build --no-cache
+        chdir: "{{ greenclaw_path }}"
+      changed_when: true
+
+    - name: Start all containers
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ greenclaw_path }}"
+      changed_when: true
+
+    - name: Wait for agent health check
+      ansible.builtin.uri:
+        url: http://localhost:3010/health
+        method: GET
+        status_code: 200
+      register: health
+      retries: 24
+      delay: 5
+      until: health.status == 200
+      failed_when: false
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 6 — Bridge plugin
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Install bridge plugin (local WordPress)
+      when: wp_is_local and not wp_is_remote
+      block:
+        - name: Create bridge plugin directory
+          ansible.builtin.file:
+            path: "{{ wp_path }}/wp-content/plugins/greenclaw-wp-bridge"
+            state: directory
+            owner: www-data
+            group: www-data
+            mode: "0755"
+
+        - name: Copy bridge plugin
+          ansible.builtin.copy:
+            src: "{{ greenclaw_path }}/wordpress-bridge-plugin/greenclaw-wp-bridge.php"
+            dest: "{{ wp_path }}/wp-content/plugins/greenclaw-wp-bridge/greenclaw-wp-bridge.php"
+            owner: www-data
+            group: www-data
+            mode: "0644"
+            remote_src: true
+
+        - name: Activate bridge plugin
+          ansible.builtin.command:
+            cmd: wp plugin activate greenclaw-wp-bridge --path={{ wp_path }} --allow-root
+          register: plugin_activate
+          changed_when: "'already active' not in plugin_activate.stdout"
+          failed_when: false
+
+        - name: Set bridge secret in WordPress
+          ansible.builtin.command:
+            cmd: wp option update greenclaw_bridge_secret {{ bridge_secret }} --path={{ wp_path }} --allow-root
+          changed_when: true
+          failed_when: false
+
+        - name: Create Application Password for agent
+          ansible.builtin.command:
+            cmd: >-
+              wp user application-password create
+              {{ wp_admin_user }} "GreenClaw Agent"
+              --path={{ wp_path }} --allow-root --porcelain
+          register: app_password_result
+          changed_when: app_password_result.rc == 0
+          failed_when: false
+
+        - name: Update .env with Application Password
+          ansible.builtin.lineinfile:
+            path: "{{ greenclaw_path }}/.env"
+            regexp: "^WP_APP_PASSWORD="
+            line: "WP_APP_PASSWORD={{ app_password_result.stdout | trim }}"
+          when: app_password_result.rc == 0 and app_password_result.stdout | trim | length > 0
+
+    - name: Show remote WordPress instructions
+      ansible.builtin.debug:
+        msg: |
+          WordPress is on a remote server. Install the bridge plugin manually:
+            1. Copy wordpress-bridge-plugin/greenclaw-wp-bridge.php to remote wp-content/plugins/greenclaw-wp-bridge/
+            2. Activate in WP Admin -> Plugins
+            3. Settings -> GreenClaw Bridge -> paste secret: {{ bridge_secret }}
+      when: wp_is_remote
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Summary
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Installation summary
+      ansible.builtin.debug:
+        msg: |
+          ========= Installation Complete =========
+
+          WordPress:
+            Site URL:     {{ wp_url }}
+            Admin panel:  {{ wp_url }}/wp-admin
+            Admin user:   {{ wp_admin_user }}
+            {% if wp_is_fresh %}Admin pass:   {{ wp_admin_password }}{% endif %}
+
+          Telegram Bot:
+            Open Telegram, message your bot, send /start
+
+          Features:
+            Model:        {{ default_model }}
+            OpenRouter:   {{ 'enabled' if openrouter_api_key | length > 0 else 'disabled' }}
+            Web search:   SearXNG (self-hosted)
+            Screenshots:  Browserless (headless Chrome)
+
+          Management:
+            docker compose ps          - container status
+            docker compose logs -f     - live logs
+            docker compose restart     - restart all
+
+          Security:
+            Monthly budget:  ${{ monthly_budget_usd }}
+            Bridge secret:   {{ bridge_secret }}
+            {% if wp_is_fresh %}
+            DB name:  {{ wp_db_name }}
+            DB user:  {{ wp_db_user }}
+            DB pass:  {{ wp_db_pass }}
+
+            Add HTTPS:
+              apt install certbot python3-certbot-nginx -y
+              certbot --nginx -d {{ wp_domain }} -d www.{{ wp_domain }}
+            {% endif %}
+
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: sshd
+        state: reloaded
+
+    - name: Reload Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Enable Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Restart MariaDB
+      ansible.builtin.systemd:
+        name: mariadb
+        state: restarted

@@ -40,6 +40,20 @@ Telegram → Bot → Agent → LiteLLM → Squid → AI APIs
 
 ## Install
 
+### Option A: Ansible (recommended)
+
+```bash
+git clone https://github.com/Illia-sanzh/greenclaw-agent.git
+cd greenclaw-agent/ansible
+cp inventory.example.yml inventory.yml        # set your server IP
+cp group_vars/all.example.yml group_vars/all.yml  # fill in API keys, tokens, etc.
+ansible-playbook -i inventory.yml install.yml
+```
+
+Idempotent — safe to run multiple times. Handles Docker, WordPress, firewall, secrets, bridge plugin, and health checks.
+
+### Option B: Bash installer (interactive)
+
 ```bash
 git clone https://github.com/Illia-sanzh/greenclaw-agent.git
 cd greenclaw-agent
@@ -48,7 +62,9 @@ sudo bash install.sh
 
 The installer walks you through everything: API keys, Telegram bot, WordPress detection, Docker setup, firewall, and secrets. Takes about 5 minutes on a fresh Ubuntu VPS.
 
-For manual setup, copy `.env.template` to `.env`, fill in your keys, and run `docker compose up -d`.
+### Option C: Manual
+
+Copy `.env.template` to `.env`, fill in your keys, and run `docker compose up -d`.
 
 ## Features
 
@@ -148,19 +164,24 @@ All configuration lives in `.env`. See [.env.template](.env.template) for the fu
 Build a clean archive to share with anyone — no secrets, no git history, no dev files:
 
 ```bash
+# Bash
 bash dist.sh            # uses latest git tag
 bash dist.sh v1.0.3     # explicit version
+
+# Or Ansible
+ansible-playbook ansible/dist.yml
 ```
 
-Outputs `/tmp/greenclaw-agent-v1.0.3.tar.gz`. The recipient just runs:
+Outputs `/tmp/greenclaw-agent-<version>.tar.gz`. The recipient runs:
 
 ```bash
-tar xzf greenclaw-agent-v1.0.3.tar.gz
-cd greenclaw-agent-v1.0.3
+tar xzf greenclaw-agent-v1.0.4.tar.gz
+cd greenclaw-agent-v1.0.4
 sudo bash install.sh
+# or: cd ansible && ansible-playbook -i inventory.yml install.yml
 ```
 
-The script scans for leaked secrets before packaging.
+Both methods scan for leaked secrets before packaging.
 
 ## Development
 
