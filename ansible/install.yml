@@ -18,44 +18,44 @@
     - name: ai_provider
       prompt: |
 
-        ╔══════════════════════════════════════════════════════╗
-        ║          WordPress Telegram Agent Installer           ║
-        ╚══════════════════════════════════════════════════════╝
+        \e[38;5;57m▰▰▰\e[38;5;63m▰▰▰\e[38;5;69m▰▰▰\e[38;5;75m▰▰▰\e[38;5;81m▰▰▰\e[38;5;87m▰▰▰\e[0m  \e[1mGreenclaw Agent\e[0m  \e[38;5;87m▰▰▰\e[38;5;81m▰▰▰\e[38;5;75m▰▰▰\e[38;5;69m▰▰▰\e[38;5;63m▰▰▰\e[38;5;57m▰▰▰\e[0m
 
-        AI Provider:
-          1) Anthropic Claude (recommended)
-          2) OpenAI ChatGPT
-          3) DeepSeek
-          4) Google Gemini
-          5) Multiple providers
+        \e[38;5;87m  ai\e[0m  Which AI provider should power the agent?
 
-        Choose provider [1-5]
+              \e[1m1)\e[0m Anthropic Claude  \e[38;5;240m(recommended)\e[0m
+              \e[1m2)\e[0m OpenAI ChatGPT
+              \e[1m3)\e[0m DeepSeek
+              \e[1m4)\e[0m Google Gemini
+              \e[1m5)\e[0m Multiple providers
+
+        Choose [1-5]
       default: "1"
       private: false
 
     - name: primary_api_key
-      prompt: "Enter your AI provider API key"
+      prompt: "\e[38;5;87m  key\e[0m  API key for your chosen provider"
       private: true
 
     - name: openrouter_api_key
-      prompt: "OpenRouter API key (optional, gives access to all LLMs — blank to skip)"
+      prompt: "\e[38;5;87m   or\e[0m  OpenRouter key \e[38;5;240m(optional — unlocks all LLMs, blank to skip)\e[0m"
       default: ""
       private: true
 
     - name: telegram_bot_token
-      prompt: "Telegram bot token (from @BotFather)"
+      prompt: "\e[38;5;87m   tg\e[0m  Telegram bot token \e[38;5;240m(from @BotFather)\e[0m"
       private: false
 
     - name: telegram_admin_user_id
-      prompt: "Your Telegram user ID (from @userinfobot)"
+      prompt: "\e[38;5;87m   id\e[0m  Your Telegram user ID \e[38;5;240m(from @userinfobot)\e[0m"
       private: false
 
     - name: site_mode
       prompt: |
 
-        Site type:
-          1) WordPress (default)
-          2) Astro static site (Cloudflare Pages)
+        \e[38;5;87m site\e[0m  What type of site does this agent manage?
+
+              \e[1m1)\e[0m WordPress  \e[38;5;240m(default)\e[0m
+              \e[1m2)\e[0m Astro  \e[38;5;240m(static site, deploys via Cloudflare Workers)\e[0m
 
         Choose [1-2]
       default: "1"
@@ -64,55 +64,56 @@
     - name: wp_mode
       prompt: |
 
-        WordPress setup:
-          1) Use existing WordPress on this server
-          2) Install WordPress from scratch
-          3) Connect to WordPress on a different server
+        \e[38;5;87m   wp\e[0m  WordPress setup:
 
-        Choose [1-3] (skip if Astro mode)
+              \e[1m1)\e[0m Use existing WordPress on this server
+              \e[1m2)\e[0m Install WordPress from scratch
+              \e[1m3)\e[0m Connect to WordPress on a different server
+
+        Choose [1-3]
       default: "1"
       private: false
 
     - name: wp_url_input
-      prompt: "WordPress URL (e.g. https://mysite.com) — or Astro project git URL if Astro mode"
+      prompt: "\e[38;5;87m  url\e[0m  Site URL \e[38;5;240m(e.g. https://mysite.com — or git repo URL for Astro)\e[0m"
       private: false
 
     - name: wp_admin_user
-      prompt: "WordPress admin username (skip if Astro mode)"
+      prompt: "\e[38;5;87m  usr\e[0m  WordPress admin username"
       default: "admin"
       private: false
 
     - name: wp_admin_password
-      prompt: "WordPress admin password (skip if Astro mode)"
+      prompt: "\e[38;5;87m  pwd\e[0m  WordPress admin password \e[38;5;240m(blank to auto-generate for fresh installs)\e[0m"
       private: true
 
     - name: wp_admin_email
-      prompt: "Admin email (skip if Astro mode)"
+      prompt: "\e[38;5;87m    @\e[0m  Admin email \e[38;5;240m(required for fresh installs)\e[0m"
       default: ""
       private: false
 
     - name: astro_project_path
-      prompt: "Astro project path on server (only for Astro mode)"
+      prompt: "\e[38;5;87m  dir\e[0m  Astro project path on server \e[38;5;240m(Astro mode only)\e[0m"
       default: "/opt/astro-site"
       private: false
 
     - name: astro_git_branch
-      prompt: "Astro deploy branch (only for Astro mode)"
+      prompt: "\e[38;5;87m  git\e[0m  Astro deploy branch \e[38;5;240m(Astro mode only)\e[0m"
       default: "main"
       private: false
 
     - name: monthly_budget_usd
-      prompt: "Monthly AI spend limit in USD"
+      prompt: "\e[38;5;87m  \$\$\$\e[0m  Monthly AI spend limit in USD"
       default: "20"
       private: false
 
     - name: github_default_repo
-      prompt: "GitHub repo for bug fix pipeline (owner/repo format, blank to skip)"
+      prompt: "\e[38;5;87m   gh\e[0m  GitHub repo for bug fixes \e[38;5;240m(owner/repo, blank to skip)\e[0m"
       default: ""
       private: false
 
     - name: greenclaw_path
-      prompt: "Install path on server"
+      prompt: "\e[38;5;87m   to\e[0m  Install path on server"
       default: "/opt/greenclaw-agent"
       private: false
 
