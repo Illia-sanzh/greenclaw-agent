@@ -1,6 +1,7 @@
 import type OpenAI from "openai";
+import { SITE_MODE } from "./config";
 
-export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+const BASE_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
@@ -244,3 +245,65 @@ export const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
     },
   },
 ];
+
+const ASTRO_TOOL_DEFS: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "git_operations",
+      description:
+        "Perform git operations in the Astro project. Use this to stage changes, commit, " +
+        "push to deploy (Cloudflare Pages), pull updates, or check status/diff.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["status", "add", "commit", "push", "pull", "diff"],
+            description: "Git operation to perform.",
+          },
+          message: { type: "string", description: "Commit message (required for 'commit' action)." },
+          files: {
+            type: "string",
+            description: "Space-separated file paths for 'add'. If omitted, stages all changes.",
+          },
+          reason: { type: "string", description: "One short sentence describing what this step does." },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "convert_document",
+      description:
+        "Convert a document (.docx, .pdf) to Astro-compatible markdown. " +
+        "Extracts text and images, generates frontmatter, and saves to the content collection. " +
+        "Images are placed in src/assets/<output_name>/.",
+      parameters: {
+        type: "object",
+        properties: {
+          input_path: {
+            type: "string",
+            description: "Path to the uploaded document file (usually in /tmp/).",
+          },
+          output_name: {
+            type: "string",
+            description: "Target filename without extension (becomes src/content/blog/<output_name>.md).",
+          },
+          reason: { type: "string", description: "One short sentence describing what this step does." },
+        },
+        required: ["input_path", "output_name"],
+      },
+    },
+  },
+];
+
+const WP_ONLY_TOOLS = new Set(["wp_rest", "wp_cli_remote", "reply_to_forum"]);
+const ASTRO_ONLY_TOOLS = new Set(["git_operations", "convert_document"]);
+
+export const TOOLS: OpenAI.Chat.ChatCompletionTool[] =
+  SITE_MODE === "astro"
+    ? BASE_TOOLS.filter((t) => !WP_ONLY_TOOLS.has(t.function.name)).concat(ASTRO_TOOL_DEFS)
+    : BASE_TOOLS.filter((t) => !ASTRO_ONLY_TOOLS.has(t.function.name));

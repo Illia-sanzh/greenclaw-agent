@@ -1,0 +1,22 @@
+# Astro mode overlay — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.astro.yml up -d --build
+#
+# Replaces WordPress volumes with Astro project mount.
+# Disables the relay container (not needed without WordPress).
+
+services:
+  greenclaw-agent:
+    volumes:
+      - ${ASTRO_PROJECT_PATH:?Set ASTRO_PROJECT_PATH in .env}:/astro-project:rw
+      - ./ASTRO-SKILL.md:/app/SKILL.md:ro
+      - ./greenclaw-config:/app/config:rw
+      - agent-tmp:/tmp/wp-agent
+      - agent-data:/app/data
+    environment:
+      SITE_MODE: astro
+      ASTRO_PROJECT_PATH: /astro-project
+      ASTRO_GIT_REMOTE: ${ASTRO_GIT_REMOTE:-origin}
+      ASTRO_GIT_BRANCH: ${ASTRO_GIT_BRANCH:-main}
+
+  greenclaw-relay:
+    profiles: ["disabled"]

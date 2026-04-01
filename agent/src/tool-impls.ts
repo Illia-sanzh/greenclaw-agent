@@ -16,6 +16,10 @@ import {
   SEARXNG_URL,
   BROWSER_URL,
   BROWSER_TOKEN,
+  SITE_MODE,
+  ASTRO_PROJECT_PATH,
+  ASTRO_GIT_REMOTE,
+  ASTRO_GIT_BRANCH,
 } from "./config";
 import { state } from "./state";
 import { httpRequest } from "./http";
@@ -228,13 +232,16 @@ export function scheduleTaskFn(task: string, runAt?: string, cronExpr?: string, 
   }
 }
 
-export const WRITABLE_PATHS = [
-  "/tmp/",
-  `${WP_PATH}/wp-content/plugins/`,
-  `${WP_PATH}/wp-content/themes/`,
-  `${WP_PATH}/wp-content/mu-plugins/`,
-  `${DATA_DIR}/`,
-];
+export const WRITABLE_PATHS =
+  SITE_MODE === "astro"
+    ? ["/tmp/", `${ASTRO_PROJECT_PATH}/`, `${DATA_DIR}/`]
+    : [
+        "/tmp/",
+        `${WP_PATH}/wp-content/plugins/`,
+        `${WP_PATH}/wp-content/themes/`,
+        `${WP_PATH}/wp-content/mu-plugins/`,
+        `${DATA_DIR}/`,
+      ];
 
 export function writeFile(filePath: string, content: string, append: boolean): string {
   if (!filePath) return "ERROR: No file path provided.";
@@ -294,7 +301,10 @@ export async function replyToForum(postId: number, content: string): Promise<str
 export function readFile(filePath: string): string {
   if (!filePath) return "ERROR: No file path provided.";
   const normalized = path.resolve(filePath);
-  const readablePaths = ["/tmp/", path.resolve(WP_PATH) + "/", "/app/config/", path.resolve(DATA_DIR) + "/"];
+  const readablePaths =
+    SITE_MODE === "astro"
+      ? ["/tmp/", path.resolve(ASTRO_PROJECT_PATH) + "/", "/app/config/", path.resolve(DATA_DIR) + "/"]
+      : ["/tmp/", path.resolve(WP_PATH) + "/", "/app/config/", path.resolve(DATA_DIR) + "/"];
   if (!readablePaths.some((p) => normalized.startsWith(p))) {
     return `ERROR: Can only read files under: ${readablePaths.join(", ")}`;
   }
@@ -444,6 +454,115 @@ function rewriteForInternalAccess(url: string): string {
     }
   } catch {}
   return url;
+}
+
+export function gitOperations(action: string, message?: string, files?: string): string {
+  const cwd = ASTRO_PROJECT_PATH;
+  if (!fs.existsSync(cwd)) return `ERROR: Astro project not found at ${cwd}`;
+
+  const run = (cmd: string) => {
+    const result = spawnSync(cmd, {
+      shell: true,
+      encoding: "utf8",
+      timeout: 60_000,
+      cwd,
+      env: { ...process.env, HOME: "/root", GIT_TERMINAL_PROMPT: "0" },
+    });
+    if (result.error) return `ERROR: ${result.error.message}`;
+    let output = (result.stdout ?? "") + (result.stderr ?? "");
+    if (output.length > MAX_OUTPUT_CHARS) output = output.slice(0, MAX_OUTPUT_CHARS) + "... [truncated]";
+    return output.trim() || "(no output)";
+  };
+
+  switch (action) {
+    case "status":
+      return run("git status --short");
+    case "diff":
+      return run("git diff --stat");
+    case "add":
+      return run(files ? `git add ${files}` : "git add -A");
+    case "commit":
+      if (!message) return "ERROR: Commit message required.";
+      if (message.includes("--force") || message.includes("-f")) return "ERROR: Suspicious commit message.";
+      return run(`git commit -m "${message.replace(/"/g, '\\"')}"`);
+    case "push":
+      return run(`git push ${ASTRO_GIT_REMOTE} ${ASTRO_GIT_BRANCH}`);
+    case "pull":
+      return run(`git pull ${ASTRO_GIT_REMOTE} ${ASTRO_GIT_BRANCH}`);
+    default:
+      return `ERROR: Unknown action "${action}". Use: status, add, commit, push, pull, diff.`;
+  }
+}
+
+export function convertDocument(inputPath: string, outputName: string): string {
+  if (!inputPath || !outputName) return "ERROR: input_path and output_name are required.";
+  if (!fs.existsSync(inputPath)) return `ERROR: File not found: ${inputPath}`;
+
+  const ext = path.extname(inputPath).toLowerCase();
+  const contentDir = path.join(ASTRO_PROJECT_PATH, "src/content/blog");
+  const assetsDir = path.join(ASTRO_PROJECT_PATH, "src/assets", outputName);
+  const outputPath = path.join(contentDir, `${outputName}.md`);
+
+  fs.mkdirSync(contentDir, { recursive: true });
+  fs.mkdirSync(assetsDir, { recursive: true });
+
+  let mdContent = "";
+
+  if (ext === ".docx") {
+    const result = spawnSync(`pandoc -f docx -t markdown --extract-media="${assetsDir}" "${inputPath}"`, {
+      shell: true,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    if (result.error || result.status !== 0) {
+      return `ERROR: pandoc conversion failed: ${(result.stderr ?? result.error?.message ?? "unknown error").slice(0, 500)}`;
+    }
+    mdContent = result.stdout ?? "";
+  } else if (ext === ".pdf") {
+    const textResult = spawnSync(`pdftotext -layout "${inputPath}" -`, {
+      shell: true,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    if (textResult.error || textResult.status !== 0) {
+      return `ERROR: pdftotext failed: ${(textResult.stderr ?? textResult.error?.message ?? "unknown").slice(0, 500)}`;
+    }
+    mdContent = textResult.stdout ?? "";
+
+    const imgResult = spawnSync(`pdfimages -png "${inputPath}" "${assetsDir}/img"`, {
+      shell: true,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    if (imgResult.status === 0) {
+      try {
+        const images = fs.readdirSync(assetsDir).filter((f) => f.startsWith("img"));
+        if (images.length > 0) {
+          mdContent += "\n\n## Images\n\n";
+          for (const img of images) {
+            mdContent += `![${img}](~/assets/${outputName}/${img})\n\n`;
+          }
+        }
+      } catch {}
+    }
+  } else {
+    return `ERROR: Unsupported format "${ext}". Supported: .docx, .pdf. For .pages, export to .docx first.`;
+  }
+
+  const title = outputName.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const date = new Date().toISOString().split("T")[0];
+  const frontmatter = `---\ntitle: "${title}"\ndescription: ""\npubDate: ${date}\ndraft: true\n---\n\n`;
+  const finalContent = frontmatter + mdContent.trim() + "\n";
+
+  fs.writeFileSync(outputPath, finalContent, "utf8");
+
+  const createdFiles = [`src/content/blog/${outputName}.md`];
+  try {
+    const assetFiles = fs.readdirSync(assetsDir);
+    for (const f of assetFiles) createdFiles.push(`src/assets/${outputName}/${f}`);
+  } catch {}
+
+  return `OK: Document converted.\nCreated files:\n${createdFiles.map((f) => `  - ${f}`).join("\n")}\n\nNote: draft=true — edit frontmatter to publish.`;
 }
 
 export async function screenshot(url: string, fullPage = false): Promise<string> {

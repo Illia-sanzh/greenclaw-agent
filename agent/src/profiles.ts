@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL } from "./config";
+import { DEFAULT_MODEL, SITE_MODE } from "./config";
 import type { TaskProfile } from "./types";
 
 export function effortBody(model: string, effort?: "low" | "medium" | "high"): Record<string, any> {
@@ -11,7 +11,7 @@ export function effortBody(model: string, effort?: "low" | "medium" | "high"): R
 export const ROUTER_MODEL =
   process.env.ROUTER_MODEL ?? (DEFAULT_MODEL.startsWith("openrouter/") ? "openrouter/gpt-5.4-mini" : "gpt-5.4-mini");
 
-export const TASK_PROFILES: Record<string, TaskProfile> = {
+const WP_PROFILES: Record<string, TaskProfile> = {
   forum_reply: {
     name: "forum_reply",
     tools: ["reply_to_forum"],
@@ -180,4 +180,72 @@ export const TASK_PROFILES: Record<string, TaskProfile> = {
   },
 };
 
-export const DEFAULT_PROFILE = TASK_PROFILES.general;
+const ASTRO_PROFILES: Record<string, TaskProfile> = {
+  astro_content: {
+    name: "astro_content",
+    tools: [
+      "run_command",
+      "read_file",
+      "write_file",
+      "convert_document",
+      "git_operations",
+      "web_search",
+      "update_agent_memory",
+    ],
+    promptSections: [
+      "astro_identity",
+      "astro_config",
+      "astro_execution_rules",
+      "astro_efficiency",
+      "astro_content",
+      "astro_deployment",
+    ],
+    knowledgePatterns: ["astro"],
+    skillFileSections: ["capabilities", "content_collections", "safety"],
+    maxSteps: 40,
+    maxTokens: 8192,
+    maxOutputChars: 10000,
+  },
+  astro_component: {
+    name: "astro_component",
+    tools: [
+      "run_command",
+      "read_file",
+      "write_file",
+      "fetch_page",
+      "web_search",
+      "screenshot",
+      "git_operations",
+      "update_agent_memory",
+    ],
+    promptSections: [
+      "astro_identity",
+      "astro_config",
+      "astro_execution_rules",
+      "astro_efficiency",
+      "astro_components",
+      "astro_deployment",
+      "web_design",
+      "custom_skills",
+    ],
+    knowledgePatterns: ["astro", "web_design"],
+    skillFileSections: ["capabilities", "component_patterns", "safety"],
+    maxSteps: 60,
+    maxTokens: 16384,
+    maxOutputChars: 12000,
+  },
+  scheduling: WP_PROFILES.scheduling,
+  astro_general: {
+    name: "astro_general",
+    tools: ["*"],
+    promptSections: ["*"],
+    knowledgePatterns: ["*"],
+    skillFileSections: ["*"],
+    maxSteps: 60,
+    maxTokens: 16384,
+    maxOutputChars: 12000,
+  },
+};
+
+export const TASK_PROFILES = SITE_MODE === "astro" ? ASTRO_PROFILES : WP_PROFILES;
+export const DEFAULT_PROFILE = SITE_MODE === "astro" ? ASTRO_PROFILES.astro_general : WP_PROFILES.general;
