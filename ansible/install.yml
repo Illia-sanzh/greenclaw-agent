@@ -50,6 +50,17 @@
       prompt: "Your Telegram user ID (from @userinfobot)"
       private: false
 
+    - name: site_mode
+      prompt: |
+
+        Site type:
+          1) WordPress (default)
+          2) Astro static site (Cloudflare Pages)
+
+        Choose [1-2]
+      default: "1"
+      private: false
+
     - name: wp_mode
       prompt: |
 
@@ -58,26 +69,36 @@
           2) Install WordPress from scratch
           3) Connect to WordPress on a different server
 
-        Choose [1-3]
+        Choose [1-3] (skip if Astro mode)
       default: "1"
       private: false
 
     - name: wp_url_input
-      prompt: "WordPress URL (e.g. https://mysite.com) or domain for fresh install"
+      prompt: "WordPress URL (e.g. https://mysite.com) — or Astro project git URL if Astro mode"
       private: false
 
     - name: wp_admin_user
-      prompt: "WordPress admin username"
+      prompt: "WordPress admin username (skip if Astro mode)"
       default: "admin"
       private: false
 
     - name: wp_admin_password
-      prompt: "WordPress admin password (blank to auto-generate for fresh installs)"
+      prompt: "WordPress admin password (skip if Astro mode)"
       private: true
 
     - name: wp_admin_email
-      prompt: "Admin email (required for fresh installs, blank otherwise)"
+      prompt: "Admin email (skip if Astro mode)"
       default: ""
+      private: false
+
+    - name: astro_project_path
+      prompt: "Astro project path on server (only for Astro mode)"
+      default: "/opt/astro-site"
+      private: false
+
+    - name: astro_git_branch
+      prompt: "Astro deploy branch (only for Astro mode)"
+      default: "main"
       private: false
 
     - name: monthly_budget_usd
@@ -114,12 +135,18 @@
     deepseek_api_key: "{{ primary_api_key if ai_provider == '3' else '' }}"
     gemini_api_key: "{{ primary_api_key if ai_provider == '4' else '' }}"
 
+    # Site mode resolution
+    _site_mode_map: { "1": "wordpress", "2": "astro" }
+    site_mode_resolved: "{{ _site_mode_map[site_mode | default('1')] | default('wordpress') }}"
+    is_astro: "{{ site_mode_resolved == 'astro' }}"
+    is_wordpress: "{{ site_mode_resolved == 'wordpress' }}"
+
     # Map wp_mode choice to semantic values
     _wp_mode_map: { "1": "local_existing", "2": "local_fresh", "3": "remote" }
     wp_mode_resolved: "{{ _wp_mode_map[wp_mode | default('1')] | default(wp_mode) }}"
-    wp_is_fresh: "{{ wp_mode_resolved == 'local_fresh' }}"
-    wp_is_remote: "{{ wp_mode_resolved == 'remote' }}"
-    wp_is_local: "{{ wp_mode_resolved != 'remote' }}"
+    wp_is_fresh: "{{ wp_mode_resolved == 'local_fresh' and is_wordpress }}"
+    wp_is_remote: "{{ wp_mode_resolved == 'remote' and is_wordpress }}"
+    wp_is_local: "{{ wp_mode_resolved != 'remote' and is_wordpress }}"
 
     # Derive URL and paths
     wp_domain: "{{ wp_url_input | regex_replace('^https?://', '') | regex_replace('/$', '') }}"
@@ -146,8 +173,14 @@
           - primary_api_key | length > 0
           - telegram_bot_token | length > 0
           - telegram_admin_user_id | length > 0
+        fail_msg: "API key, Telegram token, and user ID are all required."
+
+    - name: Validate WordPress inputs
+      ansible.builtin.assert:
+        that:
           - wp_url_input | length > 0
-        fail_msg: "API key, Telegram token, user ID, and WordPress URL are all required."
+        fail_msg: "WordPress URL is required."
+      when: is_wordpress
 
     - name: Validate fresh-install email
       ansible.builtin.assert:
@@ -200,9 +233,11 @@
       ansible.builtin.debug:
         msg: |
           Configuration:
+            Site mode:    {{ site_mode_resolved }}
             AI Provider:  {{ _provider.model }}
             OpenRouter:   {{ 'yes' if openrouter_api_key | length > 0 else 'no' }}
-            WordPress:    {{ wp_mode_resolved }} ({{ wp_url }})
+            {% if is_wordpress %}WordPress:    {{ wp_mode_resolved }} ({{ wp_url }}){% endif %}
+            {% if is_astro %}Astro project: {{ astro_project_path }}{% endif %}
             Budget:       ${{ monthly_budget_usd }}/month
             Install path: {{ greenclaw_path }}
 
@@ -619,17 +654,33 @@
         source: pull
       failed_when: false
 
+    - name: Clone Astro project
+      ansible.builtin.git:
+        repo: "{{ wp_url_input }}"
+        dest: "{{ astro_project_path }}"
+        version: "{{ astro_git_branch }}"
+      when: is_astro and wp_url_input | length > 0
+      failed_when: false
+
     - name: Build Docker images
       ansible.builtin.command:
         cmd: docker compose build --no-cache
         chdir: "{{ greenclaw_path }}"
       changed_when: true
 
-    - name: Start all containers
+    - name: Start containers (WordPress mode)
       ansible.builtin.command:
         cmd: docker compose up -d
         chdir: "{{ greenclaw_path }}"
       changed_when: true
+      when: is_wordpress
+
+    - name: Start containers (Astro mode)
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml -f docker-compose.astro.yml up -d
+        chdir: "{{ greenclaw_path }}"
+      changed_when: true
+      when: is_astro
 
     - name: Wait for agent health check
       ansible.builtin.uri:
@@ -709,10 +760,11 @@
     # Summary
     # ═════════════════════════════════════════════════════════════════════════
 
-    - name: Installation summary
+    - name: Installation summary (WordPress)
       ansible.builtin.debug:
         msg: |
           ========= Installation Complete =========
+          Mode: WordPress
 
           WordPress:
             Site URL:     {{ wp_url }}
@@ -746,6 +798,35 @@
               apt install certbot python3-certbot-nginx -y
               certbot --nginx -d {{ wp_domain }} -d www.{{ wp_domain }}
             {% endif %}
+      when: is_wordpress
+
+    - name: Installation summary (Astro)
+      ansible.builtin.debug:
+        msg: |
+          ========= Installation Complete =========
+          Mode: Astro
+
+          Astro Project:
+            Path:         {{ astro_project_path }}
+            Deploy branch: {{ astro_git_branch }}
+
+          Telegram Bot:
+            Open Telegram, message your bot, send /start
+
+          Features:
+            Model:        {{ default_model }}
+            OpenRouter:   {{ 'enabled' if openrouter_api_key | length > 0 else 'disabled' }}
+            Web search:   SearXNG (self-hosted)
+            Screenshots:  Browserless (headless Chrome)
+
+          Management:
+            docker compose -f docker-compose.yml -f docker-compose.astro.yml ps
+            docker compose -f docker-compose.yml -f docker-compose.astro.yml logs -f
+            docker compose -f docker-compose.yml -f docker-compose.astro.yml restart
+
+          Security:
+            Monthly budget:  ${{ monthly_budget_usd }}
+      when: is_astro
 
   handlers:
     - name: Reload sshd

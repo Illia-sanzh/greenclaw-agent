@@ -15,6 +15,8 @@ export const DEFAULT_MODEL = process.env.DEFAULT_MODEL ?? "claude-sonnet-4-6";
 export const FALLBACK_MODEL = process.env.FALLBACK_MODEL ?? "gpt-5.4-mini";
 export const OR_FALLBACK_MODEL = process.env.OR_FALLBACK_MODEL ?? "openrouter/gpt-5.4-mini";
 
+export const SITE_MODE = (process.env.SITE_MODE ?? "wordpress") as "wordpress" | "astro";
+
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 export const HTTPS_PROXY = process.env.HTTPS_PROXY ?? "";
 
@@ -28,6 +30,10 @@ export const SKILL_FILE = process.env.SKILL_FILE ?? "/app/SKILL.md";
 export const GITHUB_DEFAULT_REPO = process.env.GITHUB_DEFAULT_REPO ?? "";
 
 export const WP_MCP_ENDPOINT = WP_URL ? "http://host.docker.internal/wp-json/mcp/mcp-adapter-default-server" : "";
+
+export const ASTRO_PROJECT_PATH = process.env.ASTRO_PROJECT_PATH ?? "/astro-project";
+export const ASTRO_GIT_REMOTE = process.env.ASTRO_GIT_REMOTE ?? "origin";
+export const ASTRO_GIT_BRANCH = process.env.ASTRO_GIT_BRANCH ?? "main";
 
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 export const TELEGRAM_ADMIN_USER_ID = process.env.TELEGRAM_ADMIN_USER_ID ?? "";

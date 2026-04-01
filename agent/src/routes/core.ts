@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import type OpenAI from "openai";
-import { log, DEFAULT_MODEL, GITHUB_DEFAULT_REPO, TELEGRAM_ADMIN_USER_ID, INBOUND_SECRET } from "../config";
+import { log, DEFAULT_MODEL, GITHUB_DEFAULT_REPO, TELEGRAM_ADMIN_USER_ID, INBOUND_SECRET, SITE_MODE } from "../config";
 import { state } from "../state";
 import { client } from "../http";
 import { ROUTER_MODEL, TASK_PROFILES } from "../profiles";
@@ -22,6 +22,7 @@ coreRouter.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     version: "1.0.0",
+    siteMode: SITE_MODE,
     uptime: Math.floor((Date.now() - state.startedAt) / 1000),
     taskCount: state.taskCount,
     lastTaskAt: state.lastTaskAt ? new Date(state.lastTaskAt).toISOString() : null,

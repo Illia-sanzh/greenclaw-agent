@@ -1,4 +1,4 @@
-import { log, DEFAULT_MODEL } from "./config";
+import { log, DEFAULT_MODEL, SITE_MODE } from "./config";
 import { state } from "./state";
 import { client } from "./http";
 import { ROUTER_MODEL, TASK_PROFILES, DEFAULT_PROFILE, effortBody } from "./profiles";
@@ -59,8 +59,7 @@ export async function routeTask(
   history: Array<{ role: string; content: string }> = [],
   lastProfile?: string,
 ): Promise<TaskProfile> {
-  const routerPrompt = `You are a task router. Given a user message, classify it into exactly one category.
-Categories:
+  const wpCategories = `Categories:
 - forum_reply: replying to a forum post or comment, answering a question from a forum user
 - inbound_notify: event that only needs to be forwarded (votes, priority changes, type changes) — no AI response needed
 - bug_fix: investigating a bug report, searching code in GitHub, creating a fix, submitting a pull request
@@ -69,10 +68,19 @@ Categories:
 - greenshift: creating or editing Greenshift/GreenLight blocks, converting HTML to Greenshift block format, working with the Greenshift page builder or its element blocks
 - web_design: creating or modifying web pages, HTML/CSS, designing layouts, replicating designs (NOT Greenshift-specific — use greenshift for that)
 - plugin_dev: creating NEW WordPress plugins from scratch, or MAJOR rewrites (adding multiple features, restructuring, building multi-file plugins). NOT for small edits or quick fixes — use wp_admin for those.
-- general: anything that doesn't fit above, or complex multi-domain tasks
+- general: anything that doesn't fit above, or complex multi-domain tasks`;
+
+  const astroCategories = `Categories:
+- astro_content: creating/editing blog posts, markdown files, importing documents (.docx, .pdf), uploading images, content collections
+- astro_component: editing .astro/.mdx components, layouts, headers, navigation, styling, colors, design changes, page structure
+- scheduling: scheduling tasks for the future, cron jobs, reminders
+- astro_general: anything that doesn't fit above, git operations, build commands, project configuration`;
+
+  const routerPrompt = `You are a task router. Given a user message, classify it into exactly one category.
+${SITE_MODE === "astro" ? astroCategories : wpCategories}
 
 IMPORTANT — follow-up detection:
-If the conversation history shows the user was just working on a design/content task (web_design, greenshift, plugin_dev) and the new message is a follow-up, keep the SAME category as the previous task. Follow-ups include: "change X", "make it Y", "I don't like it", "try again", "create variants", "show me alternatives", "send screenshots", "make it darker/bigger/different", "add/remove a section", or any reference to the previous result. When in doubt, keep the previous category.
+If the conversation history shows the user was just working on a design/content task (${SITE_MODE === "astro" ? "astro_content, astro_component" : "web_design, greenshift, plugin_dev"}) and the new message is a follow-up, keep the SAME category as the previous task. Follow-ups include: "change X", "make it Y", "I don't like it", "try again", "create variants", "show me alternatives", "send screenshots", "make it darker/bigger/different", "add/remove a section", or any reference to the previous result. When in doubt, keep the previous category.
 ${lastProfile ? `The previous task used the "${lastProfile}" profile — prefer this unless the message is clearly a different domain.` : ""}
 
 Respond with ONLY the category name, nothing else.`;
