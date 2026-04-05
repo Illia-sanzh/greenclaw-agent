@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# WordPress Telegram Agent — Installer
+# WordPress Telegram Agent — Quick Installer (Bash)
 # Tested on: Ubuntu 24.04 (VPS)
 # Usage:     sudo bash install.sh
+#
+# NOTE: This script is intended for quick local testing only.
+# For production deployments use the Ansible playbook instead:
+#   ansible-playbook -i ansible/inventory.yml ansible/install.yml
+# The Ansible installer is idempotent, supports remote servers, and is
+# the recommended path for any real deployment.
 #
 # What this script does:
 #   1. Asks a few simple questions (API key, Telegram tokens, domain)

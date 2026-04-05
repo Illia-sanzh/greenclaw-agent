@@ -1,3 +1,11 @@
+# Development override — hot-reload via tsx --watch, higher memory, debug logging.
+#
+# Docker Compose loads this file automatically alongside docker-compose.yml
+# when you run `docker compose up` locally. Do NOT use this in production.
+#
+# In production, use docker-compose.prod.yml instead:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
 services:
   greenclaw-agent:
     restart: "no"

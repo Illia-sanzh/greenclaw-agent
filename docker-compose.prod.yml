@@ -1,3 +1,13 @@
+# Production overlay — adds resource limits, log rotation, and restart policies.
+#
+# Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# The Ansible installer applies this automatically. For manual deployments,
+# combine with the base compose and optionally the Astro overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#                  -f docker-compose.astro.yml up -d
+
 services:
   greenclaw-agent:
     restart: unless-stopped
