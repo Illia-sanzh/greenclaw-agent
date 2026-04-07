@@ -1,0 +1,105 @@
+---
+# Build a distributable archive of greenclaw-agent (no secrets, no dev files)
+# Usage: ansible-playbook dist.yml  (runs locally)
+
+- name: Build distribution archive
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    version: "{{ lookup('pipe', 'git describe --tags --abbrev=0 2>/dev/null || echo dev') }}"
+    dist_name: "greenclaw-agent-{{ version }}"
+    dist_dir: "/tmp/{{ dist_name }}"
+    archive_path: "/tmp/{{ dist_name }}.tar.gz"
+
+    # Files and directories to exclude from distribution
+    excluded_paths:
+      - .claude
+      - .github
+      - agent/__tests__
+      - vitest.config.ts
+      - .eslintrc*
+      - .prettierrc*
+      - dist.sh
+      - ansible/group_vars/all.yml
+
+    # Patterns that indicate leaked secrets
+    secret_patterns: "(sk-|AKIA|ghp_|gho_|xoxb-)"
+
+  tasks:
+    - name: "Building distribution: {{ dist_name }}"
+      ansible.builtin.debug:
+        msg: "Version: {{ version }}"
+
+    - name: Remove previous build directory
+      ansible.builtin.file:
+        path: "{{ dist_dir }}"
+        state: absent
+
+    - name: Create build directory
+      ansible.builtin.file:
+        path: "{{ dist_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Export clean copy from git
+      ansible.builtin.shell:
+        cmd: git archive HEAD | tar -x -C {{ dist_dir }}
+        chdir: "{{ playbook_dir }}/.."
+      changed_when: true
+
+    - name: Remove dev/sensitive files
+      ansible.builtin.file:
+        path: "{{ dist_dir }}/{{ item }}"
+        state: absent
+      loop: "{{ excluded_paths }}"
+
+    - name: Scan for leaked secrets
+      ansible.builtin.command:
+        cmd: grep -rnE '{{ secret_patterns }}' {{ dist_dir }}
+      register: secret_scan
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if secrets found
+      ansible.builtin.fail:
+        msg: |
+          Potential secrets found in distribution!
+          {{ secret_scan.stdout }}
+      when: secret_scan.rc == 0
+
+    - name: Check .env is not included
+      ansible.builtin.stat:
+        path: "{{ dist_dir }}/.env"
+      register: env_file
+
+    - name: Fail if .env is included
+      ansible.builtin.fail:
+        msg: ".env file found in distribution!"
+      when: env_file.stat.exists
+
+    - name: Build archive
+      community.general.archive:
+        path: "{{ dist_dir }}"
+        dest: "{{ archive_path }}"
+        format: gz
+        remove: true
+
+    - name: Get archive size
+      ansible.builtin.stat:
+        path: "{{ archive_path }}"
+      register: archive_stat
+
+    - name: Distribution built
+      ansible.builtin.debug:
+        msg: |
+          Distribution built: {{ archive_path }}
+          Size: {{ (archive_stat.stat.size / 1048576) | round(1) }} MB
+
+          To install on a server:
+            scp {{ archive_path }} user@server:~/
+            ssh user@server 'tar xzf {{ dist_name }}.tar.gz && cd {{ dist_name }} && sudo bash install.sh'
+
+          Or with Ansible:
+            ansible-playbook -i inventory.yml ansible/install.yml

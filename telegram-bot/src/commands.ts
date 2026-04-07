@@ -59,8 +59,10 @@ export function registerCommands(): void {
       const r = await agentAxios.get(`${AGENT_URL}/health`, { timeout: 5000 });
       const d = r.data;
       const routingMode = AUTO_ROUTING ? "auto (smart routing on)" : "manual";
+      const mode = d.siteMode ?? "wordpress";
       await ctx.reply(
         `✅ Agent online\n` +
+          `Mode: \`${mode}\`\n` +
           `Default model: \`${d.model ?? "unknown"}\`\n` +
           `Model routing: \`${routingMode}\`\n` +
           `Scheduler: \`${d.scheduler ?? "unknown"}\` (${d.scheduled_jobs ?? 0} job(s))\n` +

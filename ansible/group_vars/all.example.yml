@@ -1,0 +1,52 @@
+# Copy this file to all.yml and fill in your values.
+# ansible/group_vars/all.yml is gitignored — secrets stay local.
+
+# ── AI Provider Keys (set at least one) ──────────────────────────────────────
+anthropic_api_key: ""
+openai_api_key: ""
+deepseek_api_key: ""
+gemini_api_key: ""
+openrouter_api_key: ""
+
+# ── Model Configuration ─────────────────────────────────────────────────────
+default_model: "claude-sonnet-4-6"
+fallback_model: "deepseek-chat"
+monthly_budget_usd: 20
+
+# Smart routing (optional — leave fast/smart empty to disable)
+auto_routing: false
+fast_model: ""
+smart_model: ""
+
+# ── Telegram ─────────────────────────────────────────────────────────────────
+telegram_bot_token: ""          # from @BotFather
+telegram_admin_user_id: ""      # from @userinfobot
+
+# ── Voice Recognition ───────────────────────────────────────────────────────
+whisper_enabled: false           # requires openai_api_key
+
+# ── GitHub Integration (optional) ────────────────────────────────────────────
+github_default_repo: ""          # owner/repo format
+
+# ── WordPress ────────────────────────────────────────────────────────────────
+# Mode: "local_existing", "local_fresh", or "remote"
+wp_mode: "local_existing"
+
+# For local_existing — detected automatically, override if needed:
+# wp_path: "/var/www/html"
+# wp_url: "https://mysite.com"
+
+# For local_fresh:
+wp_domain: ""                    # e.g. mysite.com
+wp_title: "My WordPress Site"
+wp_admin_email: ""
+
+# For remote:
+# wp_url: "https://remote-site.com"
+
+# Shared:
+wp_admin_user: "admin"
+wp_admin_password: ""            # blank = auto-generate (fresh installs only)
+
+# ── Project Path ─────────────────────────────────────────────────────────────
+greenclaw_path: "/opt/greenclaw-agent"

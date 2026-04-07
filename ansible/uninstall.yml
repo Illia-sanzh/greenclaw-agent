@@ -1,0 +1,304 @@
+---
+# Greenclaw Agent — Uninstall Playbook
+#
+# Removes the agent Docker stack, bridge plugin, and .env.
+# WordPress, Nginx, PHP, MariaDB, WP-CLI, and Docker are kept by default.
+#
+# Agent stack only (default):
+#   ansible-playbook -i inventory.yml uninstall.yml
+#
+# Full removal (also removes WordPress, system packages, and Docker):
+#   ansible-playbook -i inventory.yml uninstall.yml -e remove_all=true
+
+- name: Uninstall Greenclaw Agent
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars_prompt:
+    - name: greenclaw_path
+      prompt: "\e[38;5;87m path\e[0m  Greenclaw install path"
+      default: "/opt/greenclaw-agent"
+      private: false
+
+    - name: confirm
+      prompt: "\e[38;5;196m !!  \e[0m  Type YES to confirm removal"
+      private: false
+
+  vars:
+    remove_all: false
+
+  pre_tasks:
+    - name: Abort if not confirmed
+      ansible.builtin.fail:
+        msg: "Aborted. Type YES to confirm."
+      when: confirm != "YES"
+
+    - name: Read WP_PATH from .env
+      ansible.builtin.shell:
+        cmd: grep "^WP_PATH=" {{ greenclaw_path }}/.env 2>/dev/null | cut -d= -f2- || echo ""
+      register: env_wp_path
+      changed_when: false
+      failed_when: false
+
+    - name: Read WP_DB_NAME from .env
+      ansible.builtin.shell:
+        cmd: grep "^WP_DB_NAME=" {{ greenclaw_path }}/.env 2>/dev/null | cut -d= -f2- || echo ""
+      register: env_wp_db_name
+      changed_when: false
+      failed_when: false
+
+    - name: Read WP_DB_USER from .env
+      ansible.builtin.shell:
+        cmd: grep "^WP_DB_USER=" {{ greenclaw_path }}/.env 2>/dev/null | cut -d= -f2- || echo ""
+      register: env_wp_db_user
+      changed_when: false
+      failed_when: false
+
+    - name: Set derived facts
+      ansible.builtin.set_fact:
+        _wp_path: "{{ env_wp_path.stdout | trim | default('/var/www/html', true) }}"
+        _wp_db_name: "{{ env_wp_db_name.stdout | trim }}"
+        _wp_db_user: "{{ env_wp_db_user.stdout | trim }}"
+
+  tasks:
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 1 — Docker stack
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Check if docker-compose.yml exists
+      ansible.builtin.stat:
+        path: "{{ greenclaw_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: Stop and remove containers, images, volumes, networks
+      ansible.builtin.command:
+        cmd: docker compose down --rmi all --volumes --remove-orphans
+        chdir: "{{ greenclaw_path }}"
+      failed_when: false
+      changed_when: true
+      when: compose_file.stat.exists
+
+    - name: Remove residual named Docker volumes
+      ansible.builtin.command:
+        cmd: docker volume rm {{ item }}
+      loop:
+        - squid-logs
+        - agent-tmp
+        - agent-data
+      failed_when: false
+      changed_when: false
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 2 — Bridge plugin
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Check bridge plugin directory
+      ansible.builtin.stat:
+        path: "{{ _wp_path }}/wp-content/plugins/greenclaw-wp-bridge"
+      register: bridge_plugin
+
+    - name: Deactivate bridge plugin
+      ansible.builtin.command:
+        cmd: wp plugin deactivate greenclaw-wp-bridge --path={{ _wp_path }} --allow-root
+      failed_when: false
+      changed_when: false
+      when: bridge_plugin.stat.exists | default(false)
+
+    - name: Remove bridge plugin files
+      ansible.builtin.file:
+        path: "{{ _wp_path }}/wp-content/plugins/greenclaw-wp-bridge"
+        state: absent
+      when: bridge_plugin.stat.exists | default(false)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 3 — Project config files
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Remove .env and install.log
+      ansible.builtin.file:
+        path: "{{ greenclaw_path }}/{{ item }}"
+        state: absent
+      loop:
+        - .env
+        - install.log
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 4 — WordPress  (remove_all only)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Remove WordPress
+      when: remove_all | bool
+      block:
+        - name: Check WordPress installation
+          ansible.builtin.stat:
+            path: "{{ _wp_path }}/wp-config.php"
+          register: wp_install
+
+        - name: Drop WordPress database
+          community.mysql.mysql_db:
+            name: "{{ _wp_db_name }}"
+            state: absent
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+          when:
+            - wp_install.stat.exists | default(false)
+            - _wp_db_name | length > 0
+          failed_when: false
+
+        - name: Remove WordPress database user
+          community.mysql.mysql_user:
+            name: "{{ _wp_db_user }}"
+            state: absent
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+          when:
+            - wp_install.stat.exists | default(false)
+            - _wp_db_user | length > 0
+          failed_when: false
+
+        - name: Remove WordPress files
+          ansible.builtin.file:
+            path: "{{ _wp_path }}"
+            state: absent
+          when: wp_install.stat.exists | default(false)
+
+        - name: Remove Nginx WordPress vhost
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/nginx/sites-enabled/wordpress
+            - /etc/nginx/sites-available/wordpress
+          failed_when: false
+          notify: Reload Nginx
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 5 — System packages  (remove_all only)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Remove system packages
+      when: remove_all | bool
+      block:
+        - name: Stop and disable Nginx
+          ansible.builtin.systemd:
+            name: nginx
+            state: stopped
+            enabled: false
+          failed_when: false
+
+        - name: Remove Nginx
+          ansible.builtin.apt:
+            name:
+              - nginx
+              - nginx-common
+              - nginx-core
+            state: absent
+            purge: true
+            autoremove: true
+          failed_when: false
+
+        - name: Remove PHP 8.3
+          ansible.builtin.apt:
+            name: "php8.3*"
+            state: absent
+            purge: true
+            autoremove: true
+          failed_when: false
+
+        - name: Stop MariaDB
+          ansible.builtin.systemd:
+            name: mariadb
+            state: stopped
+          failed_when: false
+
+        - name: Remove MariaDB
+          ansible.builtin.apt:
+            name:
+              - mariadb-server
+              - mariadb-client
+              - mariadb-common
+            state: absent
+            purge: true
+            autoremove: true
+          failed_when: false
+
+        - name: Remove MariaDB data directory
+          ansible.builtin.file:
+            path: /var/lib/mysql
+            state: absent
+          failed_when: false
+
+        - name: Remove WP-CLI
+          ansible.builtin.file:
+            path: /usr/local/bin/wp
+            state: absent
+          failed_when: false
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # STEP 6 — Docker  (remove_all only)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Remove Docker
+      when: remove_all | bool
+      block:
+        - name: Stop Docker services
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: stopped
+          loop:
+            - docker
+            - docker.socket
+            - containerd
+          failed_when: false
+
+        - name: Remove Docker packages
+          ansible.builtin.apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: absent
+            purge: true
+            autoremove: true
+          failed_when: false
+
+        - name: Remove Docker data and config directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /var/lib/docker
+            - /var/lib/containerd
+            - /etc/docker
+            - /etc/apt/sources.list.d/docker.list
+            - /etc/apt/keyrings/docker.asc
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Summary
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: Uninstall summary
+      ansible.builtin.debug:
+        msg: |
+          Greenclaw Agent removed.
+
+          {% if remove_all | bool %}
+          Also removed: WordPress, Nginx, PHP, MariaDB, WP-CLI, Docker
+          {% else %}
+          Kept intact: WordPress, Nginx, PHP, MariaDB, WP-CLI, Docker
+          For full removal: ansible-playbook -i inventory.yml uninstall.yml -e remove_all=true
+          To reinstall:     ansible-playbook -i inventory.yml install.yml
+          {% endif %}
+
+          Note: SSH hardening (PasswordAuthentication no) was NOT reversed.
+          To re-enable manually:
+            sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            systemctl reload sshd
+
+  handlers:
+    - name: Reload Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+      failed_when: false
